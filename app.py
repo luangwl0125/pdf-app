@@ -11,7 +11,7 @@ from pdf2docx import Converter as PDF2DocxConverter
 
 # Configuração da página
 st.set_page_config(
-    page_title="PDF Tools - Web App",
+    page_title="PDF Tools - Especialmente para o Kleber",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
