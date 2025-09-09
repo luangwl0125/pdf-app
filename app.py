@@ -5,15 +5,14 @@ from pathlib import Path
 import zipfile
 from typing import List, Optional
 import io
+import subprocess
 
-# Importar funções do app principal
-import sys
-sys.path.append('..')
-from app import (
-    _get_first_pdf, _parse_pages, _save_writer, _libreoffice_convert,
-    PdfReader, PdfWriter, convert_from_path, Image, extract_text,
-    PDF2DocxConverter
-)
+# Imports diretos das bibliotecas (evita import circular com app.py da raiz)
+from pypdf import PdfReader, PdfWriter
+from pdf2image import convert_from_path
+from PIL import Image
+from pdfminer.high_level import extract_text
+from pdf2docx import Converter as PDF2DocxConverter
 
 # Configuração da página
 st.set_page_config(
@@ -56,6 +55,80 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# Utilitários locais
+
+def _save_writer(writer: PdfWriter, output_path: str) -> None:
+    with open(output_path, "wb") as f:
+        writer.write(f)
+
+
+def _parse_pages(pages: str, max_index: int) -> List[int]:
+    """Converte "1,2,5-8" (1-based) em índices 0-based ordenados e únicos."""
+    indices: List[int] = []
+    if not pages:
+        return indices
+    parts = [p.strip() for p in pages.split(",") if p.strip()]
+    for part in parts:
+        if "-" in part:
+            start_s, end_s = part.split("-", 1)
+            start = int(start_s)
+            end = int(end_s)
+            if start < 1 or end < start or end > max_index:
+                raise ValueError("Intervalo de páginas inválido.")
+            indices.extend(list(range(start - 1, end)))
+        else:
+            idx = int(part)
+            if idx < 1 or idx > max_index:
+                raise ValueError("Número de página fora do intervalo.")
+            indices.append(idx - 1)
+    # Remover duplicatas mantendo ordem
+    seen = set()
+    ordered: List[int] = []
+    for i in indices:
+        if i not in seen:
+            seen.add(i)
+            ordered.append(i)
+    return ordered
+
+
+def _libreoffice_convert(input_path: str, output_dir: str, target_filter: str) -> str:
+    """Converte via LibreOffice headless. Retorna caminho convertido.
+    Observação: no Streamlit Cloud, LibreOffice pode não estar disponível.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    cmd = [
+        "soffice",
+        "--headless",
+        "--convert-to",
+        target_filter,
+        "--outdir",
+        output_dir,
+        input_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except Exception:
+        # Tentativa em Windows/nome alternativo
+        cmd[0] = "soffice.exe"
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    base_name = os.path.splitext(os.path.basename(input_path))[0]
+    target = target_filter.lower()
+    if target.startswith("pdf"):
+        converted = os.path.join(output_dir, f"{base_name}.pdf")
+    elif target.startswith("docx"):
+        converted = os.path.join(output_dir, f"{base_name}.docx")
+    elif target.startswith("pptx"):
+        converted = os.path.join(output_dir, f"{base_name}.pptx")
+    elif target.startswith("xlsx"):
+        converted = os.path.join(output_dir, f"{base_name}.xlsx")
+    else:
+        raise RuntimeError("Formato alvo não suportado pelo conversor.")
+    if not os.path.exists(converted):
+        raise RuntimeError("Falha na conversão via LibreOffice: arquivo convertido não encontrado.")
+    return converted
+
 
 def main():
     st.markdown('<h1 class="main-header">📄 PDF Tools - Web App</h1>', unsafe_allow_html=True)
