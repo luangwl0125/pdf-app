@@ -90,7 +90,7 @@ def _parse_pages(pages: str, max_index: int) -> List[int]:
 
 
 def main():
-    st.markdown('<h1 class="main-header">📄 PDF Tools - Web App</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">📄 PDF Tools - Especialmente para o Kleber</h1>', unsafe_allow_html=True)
     
     # Sidebar para navegação
     st.sidebar.title("🔧 Ferramentas")
