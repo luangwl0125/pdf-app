@@ -1,15 +1,10 @@
 import streamlit as st
 import os
 import tempfile
-from pathlib import Path
-import zipfile
 from typing import List, Optional
-import io
-import subprocess
 
-# Imports diretos das bibliotecas (evita import circular com app.py da raiz)
+# Imports diretos das bibliotecas
 from pypdf import PdfReader, PdfWriter
-from pdf2image import convert_from_path
 from PIL import Image
 from pdfminer.high_level import extract_text
 from pdf2docx import Converter as PDF2DocxConverter
@@ -92,42 +87,6 @@ def _parse_pages(pages: str, max_index: int) -> List[int]:
     return ordered
 
 
-def _libreoffice_convert(input_path: str, output_dir: str, target_filter: str) -> str:
-    """Converte via LibreOffice headless. Retorna caminho convertido.
-    Observação: no Streamlit Cloud, LibreOffice pode não estar disponível.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    cmd = [
-        "soffice",
-        "--headless",
-        "--convert-to",
-        target_filter,
-        "--outdir",
-        output_dir,
-        input_path,
-    ]
-    try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except Exception:
-        # Tentativa em Windows/nome alternativo
-        cmd[0] = "soffice.exe"
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    base_name = os.path.splitext(os.path.basename(input_path))[0]
-    target = target_filter.lower()
-    if target.startswith("pdf"):
-        converted = os.path.join(output_dir, f"{base_name}.pdf")
-    elif target.startswith("docx"):
-        converted = os.path.join(output_dir, f"{base_name}.docx")
-    elif target.startswith("pptx"):
-        converted = os.path.join(output_dir, f"{base_name}.pptx")
-    elif target.startswith("xlsx"):
-        converted = os.path.join(output_dir, f"{base_name}.xlsx")
-    else:
-        raise RuntimeError("Formato alvo não suportado pelo conversor.")
-    if not os.path.exists(converted):
-        raise RuntimeError("Falha na conversão via LibreOffice: arquivo convertido não encontrado.")
-    return converted
 
 
 def main():
@@ -140,27 +99,24 @@ def main():
     tool = st.sidebar.selectbox(
         "Escolha uma ferramenta:",
         [
-            "📄 Conversões de PDF",
+            "📄 PDF → Word",
             "🔄 Manipulação de Páginas", 
-            "🖼️ PDF ↔ Imagens",
-            "📊 Office ↔ PDF",
+            "🖼️ Imagens → PDF",
             "📝 Texto (HTML/XML)"
         ]
     )
     
-    if tool == "📄 Conversões de PDF":
-        show_pdf_conversions()
+    if tool == "📄 PDF → Word":
+        show_pdf_to_word()
     elif tool == "🔄 Manipulação de Páginas":
         show_page_manipulation()
-    elif tool == "🖼️ PDF ↔ Imagens":
-        show_image_conversions()
-    elif tool == "📊 Office ↔ PDF":
-        show_office_conversions()
+    elif tool == "🖼️ Imagens → PDF":
+        show_images_to_pdf()
     elif tool == "📝 Texto (HTML/XML)":
         show_text_extractions()
 
-def show_pdf_conversions():
-    st.header("📄 Conversões de PDF")
+def show_pdf_to_word():
+    st.header("📄 PDF → Word")
     
     col1, col2 = st.columns(2)
     
@@ -169,45 +125,27 @@ def show_pdf_conversions():
         uploaded_file = st.file_uploader(
             "Escolha um arquivo PDF",
             type=['pdf'],
-            help="Faça upload do arquivo PDF que deseja converter"
+            help="Faça upload do arquivo PDF que deseja converter para Word"
         )
     
     with col2:
-        st.subheader("⚙️ Opções de Conversão")
-        
-        conversion_type = st.selectbox(
-            "Tipo de conversão:",
-            ["PDF → Word (DOCX)", "PDF → Excel (XLSX)", "PDF → PowerPoint (PPTX)"]
-        )
-        
-        if conversion_type == "PDF → Word (DOCX)":
-            output_format = "docx"
-            output_name = "documento.docx"
-        elif conversion_type == "PDF → Excel (XLSX)":
-            output_format = "xlsx"
-            output_name = "planilha.xlsx"
-        else:  # PowerPoint
-            output_format = "pptx"
-            output_name = "apresentacao.pptx"
+        st.subheader("⚙️ Conversão")
+        st.info("💡 Converte PDF para documento Word editável (DOCX)")
+        st.warning("⚠️ A qualidade da conversão depende do layout do PDF original")
     
-    if uploaded_file and st.button("🚀 Converter", type="primary"):
-        with st.spinner("Convertendo arquivo..."):
+    if uploaded_file and st.button("🚀 Converter para Word", type="primary"):
+        with st.spinner("Convertendo PDF para Word..."):
             try:
                 # Salvar arquivo temporário
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_path = tmp_file.name
                 
-                # Converter
-                if output_format == "docx":
-                    conv = PDF2DocxConverter(tmp_path)
-                    conv.convert(output_name)
-                    conv.close()
-                else:
-                    # Para Excel e PPT, usar LibreOffice
-                    temp_dir = tempfile.mkdtemp()
-                    converted_path = _libreoffice_convert(tmp_path, temp_dir, output_format)
-                    os.rename(converted_path, output_name)
+                # Converter para Word
+                output_name = "documento.docx"
+                conv = PDF2DocxConverter(tmp_path)
+                conv.convert(output_name)
+                conv.close()
                 
                 # Limpar arquivo temporário
                 os.unlink(tmp_path)
@@ -215,13 +153,13 @@ def show_pdf_conversions():
                 # Download
                 with open(output_name, "rb") as file:
                     st.download_button(
-                        label=f"📥 Baixar {output_name}",
+                        label="📥 Baixar documento.docx",
                         data=file.read(),
                         file_name=output_name,
-                        mime="application/octet-stream"
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
                 
-                st.success(f"✅ Conversão concluída! {output_name} está pronto para download.")
+                st.success("✅ Conversão concluída! documento.docx está pronto para download.")
                 
             except Exception as e:
                 st.error(f"❌ Erro na conversão: {str(e)}")
@@ -336,103 +274,26 @@ def show_page_manipulation():
                 if os.path.exists(output_name):
                     os.remove(output_name)
 
-def show_image_conversions():
-    st.header("🖼️ PDF ↔ Imagens")
+def show_images_to_pdf():
+    st.header("🖼️ Imagens → PDF")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("📤 Upload")
-        conversion_direction = st.radio(
-            "Direção da conversão:",
-            ["PDF → Imagens", "Imagens → PDF"]
+        st.subheader("📤 Upload de Imagens")
+        uploaded_files = st.file_uploader(
+            "Escolha imagens (PNG, JPG, JPEG)",
+            type=['png', 'jpg', 'jpeg'],
+            accept_multiple_files=True,
+            help="Faça upload das imagens para converter em PDF"
         )
-        
-        if conversion_direction == "PDF → Imagens":
-            uploaded_file = st.file_uploader(
-                "Escolha um arquivo PDF",
-                type=['pdf'],
-                help="Faça upload do arquivo PDF para converter em imagens"
-            )
-        else:
-            uploaded_files = st.file_uploader(
-                "Escolha imagens (PNG, JPG, JPEG)",
-                type=['png', 'jpg', 'jpeg'],
-                accept_multiple_files=True,
-                help="Faça upload das imagens para converter em PDF"
-            )
     
     with col2:
         st.subheader("⚙️ Configurações")
-        
-        if conversion_direction == "PDF → Imagens":
-            col_a, col_b = st.columns(2)
-            with col_a:
-                format_img = st.selectbox("Formato:", ["png", "jpeg"])
-            with col_b:
-                dpi = st.slider("DPI:", 100, 300, 200)
-            
-            pages_input = st.text_input(
-                "Páginas (vazio = todas):",
-                placeholder="1,3,5 ou deixe vazio para todas"
-            )
-        else:
-            st.info("As imagens serão convertidas na ordem de upload.")
+        st.info("💡 As imagens serão convertidas na ordem de upload")
+        st.warning("⚠️ Imagens RGBA serão convertidas para RGB automaticamente")
     
-    if uploaded_file and conversion_direction == "PDF → Imagens" and st.button("🚀 Converter para Imagens", type="primary"):
-        with st.spinner("Convertendo PDF para imagens..."):
-            try:
-                # Salvar arquivo temporário
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
-                    tmp_path = tmp_file.name
-                
-                # Criar diretório temporário para imagens
-                temp_dir = tempfile.mkdtemp()
-                
-                reader = PdfReader(tmp_path)
-                pages = _parse_pages(pages_input, len(reader.pages)) if pages_input else list(range(len(reader.pages)))
-                
-                # Converter páginas
-                for idx in pages:
-                    imgs = convert_from_path(tmp_path, dpi=dpi, first_page=idx + 1, last_page=idx + 1)
-                    img = imgs[0]
-                    output_path = os.path.join(temp_dir, f"pagina_{idx+1}.{format_img}")
-                    if format_img.lower() == "jpeg":
-                        img = img.convert("RGB")
-                    img.save(output_path, quality=95) if format_img.lower() == "jpeg" else img.save(output_path)
-                
-                # Criar ZIP com as imagens
-                zip_path = "imagens_convertidas.zip"
-                with zipfile.ZipFile(zip_path, 'w') as zip_file:
-                    for file_name in os.listdir(temp_dir):
-                        file_path = os.path.join(temp_dir, file_name)
-                        zip_file.write(file_path, file_name)
-                
-                # Limpar arquivos temporários
-                os.unlink(tmp_path)
-                import shutil
-                shutil.rmtree(temp_dir)
-                
-                # Download
-                with open(zip_path, "rb") as file:
-                    st.download_button(
-                        label="📥 Baixar ZIP com imagens",
-                        data=file.read(),
-                        file_name=zip_path,
-                        mime="application/zip"
-                    )
-                
-                st.success(f"✅ Conversão concluída! {len(pages)} imagens geradas.")
-                
-            except Exception as e:
-                st.error(f"❌ Erro na conversão: {str(e)}")
-            finally:
-                # Limpar arquivos gerados
-                if os.path.exists(zip_path):
-                    os.remove(zip_path)
-    
-    elif uploaded_files and conversion_direction == "Imagens → PDF" and st.button("🚀 Converter para PDF", type="primary"):
+    if uploaded_files and st.button("🚀 Converter para PDF", type="primary"):
         with st.spinner("Convertendo imagens para PDF..."):
             try:
                 pil_images = []
@@ -469,35 +330,6 @@ def show_image_conversions():
                 if os.path.exists(output_name):
                     os.remove(output_name)
 
-def show_office_conversions():
-    st.header("📊 Office ↔ PDF")
-    
-    st.info("⚠️ Conversões Office requerem LibreOffice instalado. Funcionalidade limitada em ambiente web.")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 Upload")
-        uploaded_file = st.file_uploader(
-            "Escolha um arquivo Office ou PDF",
-            type=['pdf', 'docx', 'xlsx', 'pptx'],
-            help="Faça upload do arquivo para converter"
-        )
-    
-    with col2:
-        st.subheader("⚙️ Conversão")
-        if uploaded_file:
-            file_type = uploaded_file.name.split('.')[-1].lower()
-            
-            if file_type == 'pdf':
-                conversion_options = ["PDF → Word", "PDF → Excel", "PDF → PowerPoint"]
-            else:
-                conversion_options = [f"{file_type.upper()} → PDF"]
-            
-            conversion = st.selectbox("Converter para:", conversion_options)
-    
-    if uploaded_file and st.button("🚀 Converter", type="primary"):
-        st.warning("⚠️ Conversões Office podem não funcionar em ambiente web devido a dependências do LibreOffice.")
 
 def show_text_extractions():
     st.header("📝 Extração de Texto")
