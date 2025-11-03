@@ -4,14 +4,16 @@ import tempfile
 from pathlib import Path
 import zipfile
 import shutil
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 import io
 import subprocess
+import numpy as np
+from collections import defaultdict
 
 # Imports diretos das bibliotecas (evita import circular com app.py da raiz)
 from pypdf import PdfReader, PdfWriter
 from pdf2image import convert_from_path
-from PIL import Image
+from PIL import Image, ImageStat
 from pdfminer.high_level import extract_text
 from pdf2docx import Converter as PDF2DocxConverter
 
@@ -152,6 +154,7 @@ def main():
             "🔄 Manipulação de Páginas", 
             "🖼️ PDF ↔ Imagens",
             "🖼️ HEIC → JPEG",
+            "🔍 Selecionar Fotos Mais Nítidas",
             "📊 Office ↔ PDF",
             "📝 Texto (HTML/XML)"
         ]
@@ -165,6 +168,8 @@ def main():
         show_image_conversions()
     elif tool == "🖼️ HEIC → JPEG":
         show_heic_to_jpeg()
+    elif tool == "🔍 Selecionar Fotos Mais Nítidas":
+        show_select_sharpest_images()
     elif tool == "📊 Office ↔ PDF":
         show_office_conversions()
     elif tool == "📝 Texto (HTML/XML)":
@@ -576,6 +581,289 @@ def show_heic_to_jpeg():
             finally:
                 # Limpar arquivos temporários
                 if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+
+def calculate_sharpness(image: Image.Image) -> float:
+    """Calcula a nitidez de uma imagem usando Laplacian variance.
+    Valores maiores indicam imagens mais nítidas.
+    """
+    # Converter para escala de cinza se necessário
+    if image.mode != 'L':
+        gray = image.convert('L')
+    else:
+        gray = image
+    
+    # Converter para numpy array
+    img_array = np.array(gray, dtype=np.float64)
+    
+    # Aplicar filtro Laplacian usando convolução otimizada
+    # Kernel Laplacian 3x3
+    kernel = np.array([
+        [0, -1, 0],
+        [-1, 4, -1],
+        [0, -1, 0]
+    ], dtype=np.float64)
+    
+    # Aplicar convolução usando numpy (mais eficiente)
+    # Criar matriz de zeros para o resultado
+    h, w = img_array.shape
+    laplacian = np.zeros((h-2, w-2), dtype=np.float64)
+    
+    # Aplicar kernel
+    for i in range(h-2):
+        for j in range(w-2):
+            region = img_array[i:i+3, j:j+3]
+            laplacian[i, j] = np.sum(region * kernel)
+    
+    # Calcular variância do Laplacian (métrica de nitidez)
+    # Se a imagem for muito pequena, retornar 0
+    if laplacian.size == 0:
+        return 0.0
+    
+    variance = np.var(laplacian)
+    return float(variance)
+
+
+def calculate_image_hash(image: Image.Image, hash_size: int = 8) -> str:
+    """Calcula um hash perceptual simples da imagem para detectar duplicatas.
+    Retorna uma string representando o hash.
+    """
+    # Redimensionar para tamanho pequeno
+    small = image.resize((hash_size, hash_size), Image.Resampling.LANCZOS)
+    
+    # Converter para escala de cinza
+    gray = small.convert('L')
+    
+    # Calcular média
+    pixels = np.array(gray)
+    avg = pixels.mean()
+    
+    # Criar hash binário comparando cada pixel com a média
+    hash_bits = []
+    for pixel in pixels.flatten():
+        hash_bits.append('1' if pixel > avg else '0')
+    
+    return ''.join(hash_bits)
+
+
+def calculate_similarity(hash1: str, hash2: str) -> float:
+    """Calcula similaridade entre dois hashes (Hamming distance normalizada)."""
+    if len(hash1) != len(hash2):
+        return 0.0
+    
+    # Calcular Hamming distance
+    distance = sum(c1 != c2 for c1, c2 in zip(hash1, hash2))
+    
+    # Normalizar para 0-1 (0 = idêntico, 1 = completamente diferente)
+    similarity = 1.0 - (distance / len(hash1))
+    return similarity
+
+
+def group_duplicates(images_data: List[Tuple[str, Image.Image, str]]) -> Dict[str, List[int]]:
+    """Agrupa imagens duplicadas baseado em hash perceptual.
+    Retorna um dicionário onde a chave é o hash e o valor é lista de índices.
+    """
+    groups = defaultdict(list)
+    
+    for idx, (filename, image, hash_str) in enumerate(images_data):
+        groups[hash_str].append(idx)
+    
+    # Retornar apenas grupos com mais de uma imagem (duplicatas)
+    return {h: indices for h, indices in groups.items() if len(indices) > 1}
+
+
+def show_select_sharpest_images():
+    st.header("🔍 Selecionar Fotos Mais Nítidas")
+    
+    st.info("💡 Esta ferramenta analisa fotos de documentos duplicadas e seleciona automaticamente as mais nítidas de cada grupo.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📤 Upload de Imagens")
+        uploaded_files = st.file_uploader(
+            "Escolha imagens de documentos",
+            type=['png', 'jpg', 'jpeg', 'heic', 'heif'],
+            accept_multiple_files=True,
+            help="Faça upload de múltiplas fotos. Imagens duplicadas serão detectadas e a mais nítida será selecionada."
+        )
+    
+    with col2:
+        st.subheader("⚙️ Configurações")
+        similarity_threshold = st.slider(
+            "Limiar de similaridade para duplicatas:",
+            0.70, 1.0, 0.85,
+            help="Quanto maior, mais similar as imagens precisam ser para serem consideradas duplicatas."
+        )
+        st.info("💡 A nitidez é calculada usando análise Laplacian (variação de gradientes)")
+    
+    if uploaded_files and st.button("🚀 Analisar e Selecionar", type="primary"):
+        with st.spinner("Analisando imagens e detectando duplicatas..."):
+            try:
+                images_data = []
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # Processar todas as imagens
+                total = len(uploaded_files)
+                for idx, uploaded_file in enumerate(uploaded_files):
+                    status_text.text(f"Processando {idx + 1}/{total}: {uploaded_file.name}")
+                    progress_bar.progress((idx + 1) / total)
+                    
+                    try:
+                        # Abrir imagem
+                        img = Image.open(uploaded_file)
+                        
+                        # Converter HEIC se necessário
+                        if uploaded_file.name.lower().endswith(('.heic', '.heif')):
+                            if img.mode in ("RGBA", "P"):
+                                img = img.convert("RGB")
+                        
+                        # Calcular hash e nitidez
+                        img_hash = calculate_image_hash(img)
+                        sharpness = calculate_sharpness(img)
+                        
+                        images_data.append((uploaded_file.name, img, img_hash, sharpness))
+                    except Exception as e:
+                        st.warning(f"⚠️ Não foi possível processar {uploaded_file.name}: {str(e)}")
+                        continue
+                
+                if not images_data:
+                    st.error("❌ Nenhuma imagem válida foi processada.")
+                    return
+                
+                status_text.text("Detectando duplicatas...")
+                
+                # Agrupar por hash exato primeiro
+                hash_groups = defaultdict(list)
+                for idx, (filename, img, img_hash, sharpness) in enumerate(images_data):
+                    hash_groups[img_hash].append((idx, filename, sharpness))
+                
+                # Agrupar por similaridade (hash com pequenas diferenças)
+                all_groups = []
+                processed_indices = set()
+                
+                for hash_key, items in hash_groups.items():
+                    if len(items) > 1:
+                        # Já é um grupo de duplicatas
+                        all_groups.append([idx for idx, _, _ in items])
+                        processed_indices.update([idx for idx, _, _ in items])
+                    else:
+                        # Verificar similaridade com outros hashes
+                        idx, filename, sharpness = items[0]
+                        if idx not in processed_indices:
+                            similar_group = [idx]
+                            for other_hash, other_items in hash_groups.items():
+                                if other_hash != hash_key:
+                                    similarity = calculate_similarity(hash_key, other_hash)
+                                    if similarity >= similarity_threshold:
+                                        for other_idx, other_filename, other_sharpness in other_items:
+                                            if other_idx not in processed_indices:
+                                                similar_group.append(other_idx)
+                                                processed_indices.add(other_idx)
+                            
+                            if len(similar_group) > 1:
+                                all_groups.append(similar_group)
+                            else:
+                                processed_indices.add(idx)
+                
+                # Selecionar a mais nítida de cada grupo
+                selected_indices = []
+                selection_details = []
+                
+                if all_groups:
+                    for group_idx, group in enumerate(all_groups):
+                        # Encontrar a imagem mais nítida no grupo
+                        best_idx = max(group, key=lambda i: images_data[i][3])  # images_data[i][3] é a nitidez
+                        selected_indices.append(best_idx)
+                        
+                        # Criar detalhes do grupo
+                        group_files = [images_data[i][0] for i in group]
+                        best_file = images_data[best_idx][0]
+                        best_sharpness = images_data[best_idx][3]
+                        other_files = [images_data[i][0] for i in group if i != best_idx]
+                        
+                        selection_details.append({
+                            'group': group_idx + 1,
+                            'best_file': best_file,
+                            'best_sharpness': best_sharpness,
+                            'other_files': other_files,
+                            'total_in_group': len(group)
+                        })
+                else:
+                    st.info("ℹ️ Nenhuma duplicata detectada. Todas as imagens são únicas.")
+                
+                # Adicionar imagens únicas (não duplicadas)
+                for idx, (filename, img, img_hash, sharpness) in enumerate(images_data):
+                    if idx not in processed_indices:
+                        selected_indices.append(idx)
+                
+                # Mostrar resultados
+                st.subheader("📊 Resultados da Análise")
+                
+                if selection_details:
+                    st.write(f"**{len(selection_details)} grupo(s) de duplicatas detectado(s)**")
+                    
+                    for detail in selection_details:
+                        with st.expander(f"Grupo {detail['group']}: {detail['best_file']} (Nitidez: {detail['best_sharpness']:.2f})"):
+                            st.write(f"✅ **Selecionada:** {detail['best_file']}")
+                            st.write(f"📊 **Nitidez:** {detail['best_sharpness']:.2f}")
+                            st.write(f"📁 **Total no grupo:** {detail['total_in_group']} imagens")
+                            if detail['other_files']:
+                                st.write(f"❌ **Removidas:** {', '.join(detail['other_files'])}")
+                
+                # Preparar download das imagens selecionadas
+                temp_dir = tempfile.mkdtemp()
+                selected_files = []
+                
+                for idx in selected_indices:
+                    filename, img, img_hash, sharpness = images_data[idx]
+                    
+                    # Salvar imagem
+                    base_name = os.path.splitext(filename)[0]
+                    output_path = os.path.join(temp_dir, filename)
+                    
+                    # Converter para RGB se necessário
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    
+                    img.save(output_path)
+                    selected_files.append((output_path, filename))
+                
+                # Criar ZIP com imagens selecionadas
+                if len(selected_files) > 1:
+                    zip_path = "fotos_selecionadas.zip"
+                    with zipfile.ZipFile(zip_path, 'w') as zip_file:
+                        for file_path, file_name in selected_files:
+                            zip_file.write(file_path, file_name)
+                    
+                    # Download
+                    with open(zip_path, "rb") as file:
+                        st.download_button(
+                            label=f"📥 Baixar ZIP com {len(selected_files)} fotos selecionadas",
+                            data=file.read(),
+                            file_name=zip_path,
+                            mime="application/zip"
+                        )
+                    
+                    st.success(f"✅ Análise concluída! {len(selected_files)} foto(s) selecionada(s) de {total} total.")
+                    
+                    # Limpar ZIP
+                    if os.path.exists(zip_path):
+                        os.remove(zip_path)
+                else:
+                    st.warning("⚠️ Apenas 1 imagem selecionada. Não será criado ZIP.")
+                
+                progress_bar.empty()
+                status_text.empty()
+                
+            except Exception as e:
+                st.error(f"❌ Erro na análise: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+            finally:
+                # Limpar arquivos temporários
+                if 'temp_dir' in locals() and os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
 
 def show_office_conversions():
