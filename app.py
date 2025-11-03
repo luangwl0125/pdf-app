@@ -133,6 +133,8 @@ def _libreoffice_convert(input_path: str, output_dir: str, target_filter: str) -
         converted = os.path.join(output_dir, f"{base_name}.pptx")
     elif target.startswith("xlsx"):
         converted = os.path.join(output_dir, f"{base_name}.xlsx")
+    elif target.startswith("rtf"):
+        converted = os.path.join(output_dir, f"{base_name}.rtf")
     else:
         raise RuntimeError("Formato alvo não suportado pelo conversor.")
     if not os.path.exists(converted):
@@ -146,34 +148,1097 @@ def main():
     # Sidebar para navegação
     st.sidebar.title("🔧 Ferramentas")
     
-    # Menu de opções
-    tool = st.sidebar.selectbox(
-        "Escolha uma ferramenta:",
+    # Menu de opções - 4 seções principais
+    section = st.sidebar.selectbox(
+        "Escolha uma seção:",
         [
-            "📄 Conversões de PDF",
-            "🔄 Manipulação de Páginas", 
-            "🖼️ PDF ↔ Imagens",
-            "🖼️ HEIC → JPEG",
-            "🔍 Selecionar Fotos Mais Nítidas",
-            "📊 Office ↔ PDF",
-            "📝 Texto (HTML/XML)"
+            "📤 Converter PDF para outros formatos",
+            "📥 Converter arquivos em arquivos PDF",
+            "📑 Gerenciar páginas",
+            "🗜️ Compactar e anotar"
         ]
     )
     
-    if tool == "📄 Conversões de PDF":
-        show_pdf_conversions()
-    elif tool == "🔄 Manipulação de Páginas":
-        show_page_manipulation()
-    elif tool == "🖼️ PDF ↔ Imagens":
-        show_image_conversions()
-    elif tool == "🖼️ HEIC → JPEG":
-        show_heic_to_jpeg()
-    elif tool == "🔍 Selecionar Fotos Mais Nítidas":
-        show_select_sharpest_images()
-    elif tool == "📊 Office ↔ PDF":
-        show_office_conversions()
-    elif tool == "📝 Texto (HTML/XML)":
-        show_text_extractions()
+    if section == "📤 Converter PDF para outros formatos":
+        show_convert_pdf_to_other_formats()
+    elif section == "📥 Converter arquivos em arquivos PDF":
+        show_convert_files_to_pdf()
+    elif section == "📑 Gerenciar páginas":
+        show_manage_pages()
+    elif section == "🗜️ Compactar e anotar":
+        show_compress_and_annotate()
+
+# ============================================================================
+# SEÇÃO 1: Converter PDF para outros formatos
+# ============================================================================
+
+def show_convert_pdf_to_other_formats():
+    st.header("📤 Converter PDF para outros formatos")
+    
+    conversion_type = st.selectbox(
+        "Selecione o tipo de conversão:",
+        [
+            "PDF para Word",
+            "PDF para Excel",
+            "PDF para PPT",
+            "PDF para PNG",
+            "PDF para JPEG",
+            "PDF para XML",
+            "PDF para TXT",
+            "PDF para RTF",
+            "PDF para Páginas Web"
+        ]
+    )
+    
+    uploaded_file = st.file_uploader(
+        "Escolha um arquivo PDF",
+        type=['pdf'],
+        help="Faça upload do arquivo PDF que deseja converter"
+    )
+    
+    if uploaded_file:
+        if conversion_type == "PDF para Word":
+            convert_pdf_to_word(uploaded_file)
+        elif conversion_type == "PDF para Excel":
+            convert_pdf_to_excel(uploaded_file)
+        elif conversion_type == "PDF para PPT":
+            convert_pdf_to_ppt(uploaded_file)
+        elif conversion_type == "PDF para PNG":
+            convert_pdf_to_png(uploaded_file)
+        elif conversion_type == "PDF para JPEG":
+            convert_pdf_to_jpeg(uploaded_file)
+        elif conversion_type == "PDF para XML":
+            convert_pdf_to_xml(uploaded_file)
+        elif conversion_type == "PDF para TXT":
+            convert_pdf_to_txt(uploaded_file)
+        elif conversion_type == "PDF para RTF":
+            convert_pdf_to_rtf(uploaded_file)
+        elif conversion_type == "PDF para Páginas Web":
+            convert_pdf_to_html(uploaded_file)
+
+def convert_pdf_to_word(uploaded_file):
+    """Converte PDF para Word (DOCX)"""
+    if st.button("🚀 Converter para Word", type="primary"):
+        with st.spinner("Convertendo PDF para Word..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "documento.docx"
+                conv = PDF2DocxConverter(tmp_path)
+                conv.convert(output_name)
+                conv.close()
+                
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.docx",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_pdf_to_excel(uploaded_file):
+    """Converte PDF para Excel (XLSX)"""
+    if st.button("🚀 Converter para Excel", type="primary"):
+        with st.spinner("Convertendo PDF para Excel..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "planilha.xlsx"
+                temp_dir = tempfile.mkdtemp()
+                converted_path = _libreoffice_convert(tmp_path, temp_dir, "xlsx")
+                os.rename(converted_path, output_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar planilha.xlsx",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_pdf_to_ppt(uploaded_file):
+    """Converte PDF para PowerPoint (PPTX)"""
+    if st.button("🚀 Converter para PPT", type="primary"):
+        with st.spinner("Convertendo PDF para PowerPoint..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "apresentacao.pptx"
+                temp_dir = tempfile.mkdtemp()
+                converted_path = _libreoffice_convert(tmp_path, temp_dir, "pptx")
+                os.rename(converted_path, output_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar apresentacao.pptx",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_pdf_to_png(uploaded_file):
+    """Converte PDF para PNG"""
+    dpi = st.slider("DPI:", 100, 300, 200)
+    pages_input = st.text_input("Páginas (vazio = todas):", placeholder="1,3,5 ou deixe vazio")
+    
+    if st.button("🚀 Converter para PNG", type="primary"):
+        with st.spinner("Convertendo PDF para PNG..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                temp_dir = tempfile.mkdtemp()
+                reader = PdfReader(tmp_path)
+                pages = _parse_pages(pages_input, len(reader.pages)) if pages_input else list(range(len(reader.pages)))
+                
+                for idx in pages:
+                    imgs = convert_from_path(tmp_path, dpi=dpi, first_page=idx + 1, last_page=idx + 1)
+                    img = imgs[0]
+                    output_path = os.path.join(temp_dir, f"pagina_{idx+1}.png")
+                    img.save(output_path)
+                
+                zip_path = "imagens_png.zip"
+                with zipfile.ZipFile(zip_path, 'w') as zip_file:
+                    for file_name in os.listdir(temp_dir):
+                        zip_file.write(os.path.join(temp_dir, file_name), file_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(zip_path, "rb") as file:
+                    st.download_button(
+                        label=f"📥 Baixar ZIP com {len(pages)} imagens PNG",
+                        data=file.read(),
+                        file_name=zip_path,
+                        mime="application/zip"
+                    )
+                st.success(f"✅ {len(pages)} imagens PNG geradas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+
+def convert_pdf_to_jpeg(uploaded_file):
+    """Converte PDF para JPEG"""
+    dpi = st.slider("DPI:", 100, 300, 200)
+    quality = st.slider("Qualidade JPEG:", 50, 100, 95)
+    pages_input = st.text_input("Páginas (vazio = todas):", placeholder="1,3,5 ou deixe vazio")
+    
+    if st.button("🚀 Converter para JPEG", type="primary"):
+        with st.spinner("Convertendo PDF para JPEG..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                temp_dir = tempfile.mkdtemp()
+                reader = PdfReader(tmp_path)
+                pages = _parse_pages(pages_input, len(reader.pages)) if pages_input else list(range(len(reader.pages)))
+                
+                for idx in pages:
+                    imgs = convert_from_path(tmp_path, dpi=dpi, first_page=idx + 1, last_page=idx + 1)
+                    img = imgs[0].convert("RGB")
+                    output_path = os.path.join(temp_dir, f"pagina_{idx+1}.jpeg")
+                    img.save(output_path, "JPEG", quality=quality)
+                
+                zip_path = "imagens_jpeg.zip"
+                with zipfile.ZipFile(zip_path, 'w') as zip_file:
+                    for file_name in os.listdir(temp_dir):
+                        zip_file.write(os.path.join(temp_dir, file_name), file_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(zip_path, "rb") as file:
+                    st.download_button(
+                        label=f"📥 Baixar ZIP com {len(pages)} imagens JPEG",
+                        data=file.read(),
+                        file_name=zip_path,
+                        mime="application/zip"
+                    )
+                st.success(f"✅ {len(pages)} imagens JPEG geradas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+
+def convert_pdf_to_xml(uploaded_file):
+    """Converte PDF para XML"""
+    if st.button("🚀 Converter para XML", type="primary"):
+        with st.spinner("Convertendo PDF para XML..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                texto = extract_text(tmp_path) or ""
+                content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<documento>
+  <conteudo>{texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</conteudo>
+</documento>"""
+                output_name = "documento.xml"
+                
+                with open(output_name, "w", encoding="utf-8") as f:
+                    f.write(content)
+                
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.xml",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/xml"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_pdf_to_txt(uploaded_file):
+    """Converte PDF para TXT"""
+    if st.button("🚀 Converter para TXT", type="primary"):
+        with st.spinner("Convertendo PDF para TXT..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                texto = extract_text(tmp_path) or ""
+                output_name = "documento.txt"
+                
+                with open(output_name, "w", encoding="utf-8") as f:
+                    f.write(texto)
+                
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.txt",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="text/plain"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_pdf_to_rtf(uploaded_file):
+    """Converte PDF para RTF"""
+    if st.button("🚀 Converter para RTF", type="primary"):
+        with st.spinner("Convertendo PDF para RTF..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "documento.rtf"
+                temp_dir = tempfile.mkdtemp()
+                converted_path = _libreoffice_convert(tmp_path, temp_dir, "rtf")
+                os.rename(converted_path, output_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.rtf",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/rtf"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_pdf_to_html(uploaded_file):
+    """Converte PDF para HTML (Páginas Web)"""
+    if st.button("🚀 Converter para HTML", type="primary"):
+        with st.spinner("Convertendo PDF para HTML..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                texto = extract_text(tmp_path) or ""
+                content = f"""<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documento PDF Convertido</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
+    </style>
+</head>
+<body>
+    <pre>{texto}</pre>
+</body>
+</html>"""
+                output_name = "documento.html"
+                
+                with open(output_name, "w", encoding="utf-8") as f:
+                    f.write(content)
+                
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.html",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="text/html"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+# ============================================================================
+# SEÇÃO 2: Converter arquivos em arquivos PDF
+# ============================================================================
+
+def show_convert_files_to_pdf():
+    st.header("📥 Converter arquivos em arquivos PDF")
+    
+    conversion_type = st.selectbox(
+        "Selecione o tipo de conversão:",
+        [
+            "Word para PDF",
+            "Excel para PDF",
+            "Imagem para PDF",
+            "PPT para PDF",
+            "TXT para PDF",
+            "RTF para PDF"
+        ]
+    )
+    
+    if conversion_type == "Imagem para PDF":
+        uploaded_files = st.file_uploader(
+            "Escolha imagens",
+            type=['png', 'jpg', 'jpeg', 'heic', 'heif'],
+            accept_multiple_files=True
+        )
+        if uploaded_files:
+            convert_images_to_pdf(uploaded_files)
+    else:
+        file_type_map = {
+            "Word para PDF": ['docx', 'doc'],
+            "Excel para PDF": ['xlsx', 'xls'],
+            "PPT para PDF": ['pptx', 'ppt'],
+            "TXT para PDF": ['txt'],
+            "RTF para PDF": ['rtf']
+        }
+        uploaded_file = st.file_uploader(
+            f"Escolha um arquivo {conversion_type.split(' para ')[0]}",
+            type=file_type_map[conversion_type]
+        )
+        
+        if uploaded_file:
+            if conversion_type == "Word para PDF":
+                convert_word_to_pdf(uploaded_file)
+            elif conversion_type == "Excel para PDF":
+                convert_excel_to_pdf(uploaded_file)
+            elif conversion_type == "PPT para PDF":
+                convert_ppt_to_pdf(uploaded_file)
+            elif conversion_type == "TXT para PDF":
+                convert_txt_to_pdf(uploaded_file)
+            elif conversion_type == "RTF para PDF":
+                convert_rtf_to_pdf(uploaded_file)
+
+def convert_word_to_pdf(uploaded_file):
+    """Converte Word para PDF"""
+    if st.button("🚀 Converter para PDF", type="primary"):
+        with st.spinner("Convertendo Word para PDF..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "documento.pdf"
+                temp_dir = tempfile.mkdtemp()
+                converted_path = _libreoffice_convert(tmp_path, temp_dir, "pdf")
+                os.rename(converted_path, output_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.pdf",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_excel_to_pdf(uploaded_file):
+    """Converte Excel para PDF"""
+    if st.button("🚀 Converter para PDF", type="primary"):
+        with st.spinner("Convertendo Excel para PDF..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "planilha.pdf"
+                temp_dir = tempfile.mkdtemp()
+                converted_path = _libreoffice_convert(tmp_path, temp_dir, "pdf")
+                os.rename(converted_path, output_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar planilha.pdf",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_ppt_to_pdf(uploaded_file):
+    """Converte PowerPoint para PDF"""
+    if st.button("🚀 Converter para PDF", type="primary"):
+        with st.spinner("Convertendo PowerPoint para PDF..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "apresentacao.pdf"
+                temp_dir = tempfile.mkdtemp()
+                converted_path = _libreoffice_convert(tmp_path, temp_dir, "pdf")
+                os.rename(converted_path, output_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar apresentacao.pdf",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_images_to_pdf(uploaded_files):
+    """Converte imagens para PDF"""
+    if st.button("🚀 Converter para PDF", type="primary"):
+        with st.spinner("Convertendo imagens para PDF..."):
+            try:
+                pil_images = []
+                for uploaded_file in uploaded_files:
+                    img = Image.open(uploaded_file)
+                    if uploaded_file.name.lower().endswith(('.heic', '.heif')):
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                    else:
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                    pil_images.append(img)
+                
+                if not pil_images:
+                    st.error("❌ Nenhuma imagem válida encontrada.")
+                    return
+                
+                output_name = "imagens_convertidas.pdf"
+                primeira, restantes = pil_images[0], pil_images[1:]
+                primeira.save(output_name, save_all=True, append_images=restantes)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success(f"✅ PDF com {len(pil_images)} imagens gerado!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_txt_to_pdf(uploaded_file):
+    """Converte TXT para PDF"""
+    font_size = st.slider("Tamanho da fonte:", 8, 24, 12)
+    
+    if st.button("🚀 Converter para PDF", type="primary"):
+        with st.spinner("Convertendo TXT para PDF..."):
+            try:
+                from reportlab.lib.pagesizes import letter, A4
+                from reportlab.pdfgen import canvas
+                from reportlab.lib.units import inch
+                
+                texto = uploaded_file.read().decode('utf-8', errors='ignore')
+                output_name = "documento.pdf"
+                
+                c = canvas.Canvas(output_name, pagesize=A4)
+                width, height = A4
+                margin = inch
+                y = height - margin
+                line_height = font_size * 1.2
+                
+                lines = texto.split('\n')
+                for line in lines:
+                    if y < margin:
+                        c.showPage()
+                        y = height - margin
+                    c.setFont("Helvetica", font_size)
+                    c.drawString(margin, y, line[:100])  # Limitar largura
+                    y -= line_height
+                
+                c.save()
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.pdf",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def convert_rtf_to_pdf(uploaded_file):
+    """Converte RTF para PDF"""
+    if st.button("🚀 Converter para PDF", type="primary"):
+        with st.spinner("Convertendo RTF para PDF..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.rtf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                output_name = "documento.pdf"
+                temp_dir = tempfile.mkdtemp()
+                converted_path = _libreoffice_convert(tmp_path, temp_dir, "pdf")
+                os.rename(converted_path, output_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar documento.pdf",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Conversão concluída!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+# ============================================================================
+# SEÇÃO 3: Gerenciar páginas
+# ============================================================================
+
+def show_manage_pages():
+    st.header("📑 Gerenciar páginas")
+    
+    operation = st.selectbox(
+        "Selecione a operação:",
+        [
+            "Mesclar PDF",
+            "Dividir PDF",
+            "Eliminar páginas",
+            "Inserir páginas",
+            "Cortar páginas",
+            "Extrair páginas",
+            "Girar páginas"
+        ]
+    )
+    
+    if operation == "Mesclar PDF":
+        show_merge_pdfs()
+    elif operation == "Dividir PDF":
+        show_split_pdf()
+    elif operation == "Eliminar páginas":
+        show_remove_pages()
+    elif operation == "Inserir páginas":
+        show_insert_pages()
+    elif operation == "Cortar páginas":
+        show_crop_pages()
+    elif operation == "Extrair páginas":
+        show_extract_pages()
+    elif operation == "Girar páginas":
+        show_rotate_pages()
+
+def show_merge_pdfs():
+    """Mescla múltiplos PDFs"""
+    uploaded_files = st.file_uploader(
+        "Escolha múltiplos arquivos PDF",
+        type=['pdf'],
+        accept_multiple_files=True
+    )
+    
+    if uploaded_files and len(uploaded_files) > 1 and st.button("🚀 Mesclar PDFs", type="primary"):
+        with st.spinner("Mesclando PDFs..."):
+            try:
+                writer = PdfWriter()
+                
+                for uploaded_file in uploaded_files:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                        tmp_file.write(uploaded_file.getvalue())
+                        tmp_path = tmp_file.name
+                    
+                    reader = PdfReader(tmp_path)
+                    for page in reader.pages:
+                        writer.add_page(page)
+                    os.unlink(tmp_path)
+                
+                output_name = "pdf_mesclado.pdf"
+                _save_writer(writer, output_name)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF mesclado",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success(f"✅ {len(uploaded_files)} PDFs mesclados com sucesso!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def show_split_pdf():
+    """Divide PDF em páginas individuais"""
+    uploaded_file = st.file_uploader("Escolha um arquivo PDF", type=['pdf'])
+    
+    if uploaded_file and st.button("🚀 Dividir PDF", type="primary"):
+        with st.spinner("Dividindo PDF..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                reader = PdfReader(tmp_path)
+                temp_dir = tempfile.mkdtemp()
+                
+                for i, page in enumerate(reader.pages):
+                    writer = PdfWriter()
+                    writer.add_page(page)
+                    output_path = os.path.join(temp_dir, f"pagina_{i+1}.pdf")
+                    _save_writer(writer, output_path)
+                
+                zip_path = "pdf_dividido.zip"
+                with zipfile.ZipFile(zip_path, 'w') as zip_file:
+                    for file_name in os.listdir(temp_dir):
+                        zip_file.write(os.path.join(temp_dir, file_name), file_name)
+                
+                os.unlink(tmp_path)
+                shutil.rmtree(temp_dir)
+                
+                with open(zip_path, "rb") as file:
+                    st.download_button(
+                        label=f"📥 Baixar ZIP com {len(reader.pages)} páginas",
+                        data=file.read(),
+                        file_name=zip_path,
+                        mime="application/zip"
+                    )
+                st.success(f"✅ PDF dividido em {len(reader.pages)} páginas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+
+def show_remove_pages():
+    """Remove páginas do PDF"""
+    uploaded_file = st.file_uploader("Escolha um arquivo PDF", type=['pdf'])
+    pages_input = st.text_input("Páginas para remover (ex: 2,5,8-10):", placeholder="2,5,8-10")
+    
+    if uploaded_file and st.button("🚀 Remover páginas", type="primary"):
+        with st.spinner("Removendo páginas..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                reader = PdfReader(tmp_path)
+                writer = PdfWriter()
+                remove_set = set(_parse_pages(pages_input, len(reader.pages)))
+                
+                for i, page in enumerate(reader.pages):
+                    if i not in remove_set:
+                        writer.add_page(page)
+                
+                output_name = "paginas_removidas.pdf"
+                _save_writer(writer, output_name)
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Páginas removidas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def show_insert_pages():
+    """Insere páginas de um PDF em outro"""
+    col1, col2 = st.columns(2)
+    with col1:
+        base_pdf = st.file_uploader("PDF base", type=['pdf'])
+    with col2:
+        insert_pdf = st.file_uploader("PDF a inserir", type=['pdf'])
+    
+    position = st.number_input("Inserir após a página:", min_value=0, value=0)
+    
+    if base_pdf and insert_pdf and st.button("🚀 Inserir páginas", type="primary"):
+        with st.spinner("Inserindo páginas..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_base:
+                    tmp_base.write(base_pdf.getvalue())
+                    tmp_base_path = tmp_base.name
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_insert:
+                    tmp_insert.write(insert_pdf.getvalue())
+                    tmp_insert_path = tmp_insert.name
+                
+                base_reader = PdfReader(tmp_base_path)
+                insert_reader = PdfReader(tmp_insert_path)
+                writer = PdfWriter()
+                
+                # Adicionar páginas até a posição
+                for i in range(min(position, len(base_reader.pages))):
+                    writer.add_page(base_reader.pages[i])
+                
+                # Inserir páginas do segundo PDF
+                for page in insert_reader.pages:
+                    writer.add_page(page)
+                
+                # Adicionar páginas restantes do primeiro PDF
+                for i in range(position, len(base_reader.pages)):
+                    writer.add_page(base_reader.pages[i])
+                
+                output_name = "pdf_com_insercao.pdf"
+                _save_writer(writer, output_name)
+                os.unlink(tmp_base_path)
+                os.unlink(tmp_insert_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Páginas inseridas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def show_crop_pages():
+    """Corta páginas do PDF (extrai parte específica)"""
+    uploaded_file = st.file_uploader("Escolha um arquivo PDF", type=['pdf'])
+    pages_input = st.text_input("Páginas para cortar (ex: 1-3,7,10-12):", placeholder="1-3,7,10-12")
+    
+    if uploaded_file and st.button("🚀 Cortar páginas", type="primary"):
+        with st.spinner("Cortando páginas..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                reader = PdfReader(tmp_path)
+                writer = PdfWriter()
+                indices = _parse_pages(pages_input, len(reader.pages))
+                
+                for i in indices:
+                    writer.add_page(reader.pages[i])
+                
+                output_name = "paginas_cortadas.pdf"
+                _save_writer(writer, output_name)
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Páginas cortadas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def show_extract_pages():
+    """Extrai páginas específicas"""
+    uploaded_file = st.file_uploader("Escolha um arquivo PDF", type=['pdf'])
+    pages_input = st.text_input("Páginas para extrair (ex: 1-3,7,10-12):", placeholder="1-3,7,10-12")
+    
+    if uploaded_file and st.button("🚀 Extrair páginas", type="primary"):
+        with st.spinner("Extraindo páginas..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                reader = PdfReader(tmp_path)
+                writer = PdfWriter()
+                indices = _parse_pages(pages_input, len(reader.pages))
+                
+                for i in indices:
+                    writer.add_page(reader.pages[i])
+                
+                output_name = "paginas_extraidas.pdf"
+                _save_writer(writer, output_name)
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Páginas extraídas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def show_rotate_pages():
+    """Gira páginas do PDF"""
+    uploaded_file = st.file_uploader("Escolha um arquivo PDF", type=['pdf'])
+    col1, col2 = st.columns(2)
+    with col1:
+        angle = st.selectbox("Ângulo:", ["90", "180", "270"])
+    with col2:
+        pages_input = st.text_input("Páginas para girar (vazio = todas):", placeholder="1,3,5 ou vazio")
+    
+    if uploaded_file and st.button("🚀 Girar páginas", type="primary"):
+        with st.spinner("Girando páginas..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                reader = PdfReader(tmp_path)
+                writer = PdfWriter()
+                indices = set(_parse_pages(pages_input, len(reader.pages))) if pages_input else set(range(len(reader.pages)))
+                angle_val = int(angle)
+                
+                for i, page in enumerate(reader.pages):
+                    if i in indices:
+                        page.rotate(angle_val)
+                    writer.add_page(page)
+                
+                output_name = f"rotacionado_{angle}graus.pdf"
+                _save_writer(writer, output_name)
+                os.unlink(tmp_path)
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ Páginas giradas!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+# ============================================================================
+# SEÇÃO 4: Compactar e anotar
+# ============================================================================
+
+def show_compress_and_annotate():
+    st.header("🗜️ Compactar e anotar")
+    
+    operation = st.selectbox(
+        "Selecione a operação:",
+        [
+            "Comprimir PDF",
+            "Anotar em PDF",
+            "Preencher formulário"
+        ]
+    )
+    
+    if operation == "Comprimir PDF":
+        show_compress_pdf()
+    elif operation == "Anotar em PDF":
+        show_annotate_pdf()
+    elif operation == "Preencher formulário":
+        st.info("🚧 Funcionalidade em desenvolvimento. Em breve você poderá preencher formulários PDF interativamente.")
+        st.warning("⚠️ Esta funcionalidade requer bibliotecas adicionais para manipulação de campos de formulário.")
+
+def show_compress_pdf():
+    """Comprime PDF"""
+    uploaded_file = st.file_uploader("Escolha um arquivo PDF", type=['pdf'])
+    compression_level = st.selectbox(
+        "Nível de compressão:",
+        ["Alto (menor tamanho)", "Médio (balanceado)", "Baixo (melhor qualidade)"]
+    )
+    
+    if uploaded_file and st.button("🚀 Comprimir PDF", type="primary"):
+        with st.spinner("Comprimindo PDF..."):
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                reader = PdfReader(tmp_path)
+                writer = PdfWriter()
+                
+                # Copiar todas as páginas
+                for page in reader.pages:
+                    writer.add_page(page)
+                
+                # Configurar compressão baseado no nível
+                if compression_level == "Alto (menor tamanho)":
+                    # Comprimir imagens e conteúdo
+                    for page_num in range(len(writer.pages)):
+                        writer.pages[page_num].compress_content_streams()
+                elif compression_level == "Médio (balanceado)":
+                    # Compressão moderada
+                    for page_num in range(len(writer.pages)):
+                        writer.pages[page_num].compress_content_streams()
+                
+                output_name = "pdf_comprimido.pdf"
+                _save_writer(writer, output_name)
+                
+                # Mostrar tamanhos
+                original_size = os.path.getsize(tmp_path)
+                compressed_size = os.path.getsize(output_name)
+                reduction = ((original_size - compressed_size) / original_size) * 100
+                
+                os.unlink(tmp_path)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Tamanho original", f"{original_size / 1024:.2f} KB")
+                with col2:
+                    st.metric("Tamanho comprimido", f"{compressed_size / 1024:.2f} KB")
+                with col3:
+                    st.metric("Redução", f"{reduction:.1f}%")
+                
+                with open(output_name, "rb") as file:
+                    st.download_button(
+                        label="📥 Baixar PDF comprimido",
+                        data=file.read(),
+                        file_name=output_name,
+                        mime="application/pdf"
+                    )
+                st.success("✅ PDF comprimido!")
+            except Exception as e:
+                st.error(f"❌ Erro: {str(e)}")
+            finally:
+                if os.path.exists(output_name):
+                    os.remove(output_name)
+
+def show_annotate_pdf():
+    """Anota PDF com texto ou marca d'água"""
+    uploaded_file = st.file_uploader("Escolha um arquivo PDF", type=['pdf'])
+    annotation_type = st.selectbox(
+        "Tipo de anotação:",
+        ["Texto", "Marca d'água"]
+    )
+    
+    if uploaded_file:
+        if annotation_type == "Texto":
+            text = st.text_area("Texto da anotação:")
+            x = st.number_input("Posição X:", value=100)
+            y = st.number_input("Posição Y:", value=100)
+            font_size = st.slider("Tamanho da fonte:", 8, 72, 12)
+            
+            if st.button("🚀 Adicionar anotação", type="primary"):
+                st.info("🚧 Funcionalidade em desenvolvimento. Em breve você poderá adicionar anotações de texto aos PDFs.")
+        else:
+            watermark_text = st.text_input("Texto da marca d'água:")
+            opacity = st.slider("Opacidade:", 0.0, 1.0, 0.5)
+            
+            if st.button("🚀 Adicionar marca d'água", type="primary"):
+                st.info("🚧 Funcionalidade em desenvolvimento. Em breve você poderá adicionar marcas d'água aos PDFs.")
 
 def show_pdf_conversions():
     st.header("📄 Conversões de PDF")
