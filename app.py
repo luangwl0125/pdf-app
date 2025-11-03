@@ -357,6 +357,10 @@ def show_image_conversions():
     
     col1, col2 = st.columns(2)
     
+    # Inicializar variáveis para evitar UnboundLocalError
+    uploaded_file = None
+    uploaded_files = None
+    
     with col1:
         st.subheader("📤 Upload")
         conversion_direction = st.radio(
