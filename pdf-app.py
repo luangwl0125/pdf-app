@@ -1,21 +1,422 @@
-import streamlit as st
+"""
+Aplicação PDF Tools - Web App Completa
+Inclui módulo de scanner de documentos e todas as funcionalidades de manipulação de PDF
+"""
+
+# ============================================================================
+# PARTE 1: MÓDULO DE SCANNER DE DOCUMENTOS (OCR)
+# ============================================================================
+
 import os
 import tempfile
+from typing import List, Tuple, Optional, Dict
 from pathlib import Path
+import numpy as np
+from PIL import Image, ImageEnhance, ImageFilter
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    cv2 = None
+
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+
+try:
+    from pdf2image import convert_from_path
+    PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    PDF2IMAGE_AVAILABLE = False
+
+from pypdf import PdfReader
+
+
+class DocumentScanner:
+    """Classe para escanear e processar documentos PDF e imagens"""
+    
+    def __init__(self):
+        self.tesseract_available = TESSERACT_AVAILABLE
+        self.pdf2image_available = PDF2IMAGE_AVAILABLE
+        
+    def preprocess_image(self, image: Image.Image, enhance_quality: bool = True) -> Image.Image:
+        """
+        Pré-processa imagem para melhorar a qualidade do OCR
+        
+        Args:
+            image: Imagem PIL a ser processada
+            enhance_quality: Se True, aplica melhorias de qualidade
+            
+        Returns:
+            Imagem processada
+        """
+        if not CV2_AVAILABLE:
+            # Se OpenCV não estiver disponível, usar apenas PIL
+            if enhance_quality:
+                return self.enhance_image(image)
+            return image.convert('L') if image.mode != 'L' else image
+        
+        # Converter para numpy array para processamento OpenCV
+        img_array = np.array(image)
+        
+        # Converter para escala de cinza se necessário
+        if len(img_array.shape) == 3:
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img_array
+        
+        if enhance_quality:
+            # Aplicar desfoque gaussiano para reduzir ruído
+            denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+            
+            # Aplicar threshold adaptativo para melhorar contraste
+            thresh = cv2.adaptiveThreshold(
+                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                cv2.THRESH_BINARY, 11, 2
+            )
+            
+            # Converter de volta para PIL Image
+            processed = Image.fromarray(thresh)
+        else:
+            processed = Image.fromarray(gray)
+        
+        return processed
+    
+    def enhance_image(self, image: Image.Image) -> Image.Image:
+        """
+        Melhora a qualidade da imagem para OCR
+        
+        Args:
+            image: Imagem PIL
+            
+        Returns:
+            Imagem melhorada
+        """
+        # Aumentar contraste
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(1.5)
+        
+        # Aumentar nitidez
+        enhancer = ImageEnhance.Sharpness(image)
+        image = enhancer.enhance(2.0)
+        
+        # Aumentar brilho se necessário
+        enhancer = ImageEnhance.Brightness(image)
+        image = enhancer.enhance(1.1)
+        
+        return image
+    
+    def extract_text_from_image(
+        self, 
+        image: Image.Image, 
+        lang: str = 'por',
+        preprocess: bool = True,
+        enhance: bool = True
+    ) -> Dict[str, any]:
+        """
+        Extrai texto de uma imagem usando OCR
+        
+        Args:
+            image: Imagem PIL
+            lang: Idioma para OCR (padrão: português)
+            preprocess: Se True, aplica pré-processamento
+            enhance: Se True, melhora a qualidade da imagem
+            
+        Returns:
+            Dicionário com texto extraído e metadados
+        """
+        if not self.tesseract_available:
+            raise ImportError(
+                "pytesseract não está instalado. "
+                "Instale com: pip install pytesseract\n"
+                "E instale o Tesseract OCR: https://github.com/tesseract-ocr/tesseract"
+            )
+        
+        # Pré-processar imagem
+        if preprocess:
+            processed_image = self.preprocess_image(image, enhance_quality=enhance)
+        else:
+            processed_image = image
+        
+        # Melhorar qualidade se solicitado
+        if enhance and not preprocess:
+            processed_image = self.enhance_image(processed_image)
+        
+        # Extrair texto usando Tesseract
+        try:
+            # Configuração do Tesseract para melhor precisão
+            custom_config = r'--oem 3 --psm 6'
+            
+            # Extrair texto simples
+            text = pytesseract.image_to_string(processed_image, lang=lang, config=custom_config)
+            
+            # Extrair dados estruturados
+            data = pytesseract.image_to_data(
+                processed_image, 
+                lang=lang, 
+                config=custom_config,
+                output_type=pytesseract.Output.DICT
+            )
+            
+            # Extrair informações de confiança
+            confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+            
+            return {
+                'text': text.strip(),
+                'confidence': avg_confidence,
+                'word_count': len(text.split()),
+                'char_count': len(text),
+                'data': data
+            }
+        except Exception as e:
+            return {
+                'text': '',
+                'confidence': 0,
+                'word_count': 0,
+                'char_count': 0,
+                'error': str(e),
+                'data': {}
+            }
+    
+    def extract_text_from_pdf(
+        self,
+        pdf_path: str,
+        pages: Optional[List[int]] = None,
+        lang: str = 'por',
+        dpi: int = 300,
+        preprocess: bool = True,
+        enhance: bool = True
+    ) -> Dict[str, any]:
+        """
+        Extrai texto de um PDF usando OCR
+        
+        Args:
+            pdf_path: Caminho para o arquivo PDF
+            pages: Lista de páginas para processar (None = todas)
+            lang: Idioma para OCR
+            dpi: Resolução para conversão de PDF para imagem
+            preprocess: Se True, aplica pré-processamento
+            enhance: Se True, melhora a qualidade
+            
+        Returns:
+            Dicionário com texto extraído por página e estatísticas
+        """
+        if not self.pdf2image_available:
+            raise ImportError(
+                "pdf2image não está instalado. "
+                "Instale com: pip install pdf2image\n"
+                "E instale o poppler: https://poppler.freedesktop.org/"
+            )
+        
+        # Ler PDF
+        reader = PdfReader(pdf_path)
+        total_pages = len(reader.pages)
+        
+        # Determinar páginas para processar
+        if pages is None:
+            pages_to_process = list(range(total_pages))
+        else:
+            # Converter de 1-based para 0-based
+            pages_to_process = [p - 1 for p in pages if 1 <= p <= total_pages]
+        
+        # Converter PDF para imagens
+        images = convert_from_path(pdf_path, dpi=dpi, first_page=1, last_page=total_pages)
+        
+        results = {
+            'total_pages': total_pages,
+            'processed_pages': len(pages_to_process),
+            'pages': {},
+            'full_text': '',
+            'total_confidence': 0,
+            'total_words': 0,
+            'total_chars': 0
+        }
+        
+        # Processar cada página
+        for page_idx in pages_to_process:
+            if page_idx < len(images):
+                image = images[page_idx]
+                page_result = self.extract_text_from_image(
+                    image, 
+                    lang=lang, 
+                    preprocess=preprocess, 
+                    enhance=enhance
+                )
+                
+                results['pages'][page_idx + 1] = page_result
+                results['full_text'] += f"\n\n--- Página {page_idx + 1} ---\n\n"
+                results['full_text'] += page_result.get('text', '')
+                results['total_words'] += page_result.get('word_count', 0)
+                results['total_chars'] += page_result.get('char_count', 0)
+                
+                if 'confidence' in page_result:
+                    results['total_confidence'] += page_result['confidence']
+        
+        # Calcular confiança média
+        if results['processed_pages'] > 0:
+            results['avg_confidence'] = results['total_confidence'] / results['processed_pages']
+        else:
+            results['avg_confidence'] = 0
+        
+        return results
+    
+    def scan_document(
+        self,
+        file_path: str,
+        file_type: str = 'auto',
+        lang: str = 'por',
+        dpi: int = 300,
+        preprocess: bool = True,
+        enhance: bool = True,
+        pages: Optional[List[int]] = None
+    ) -> Dict[str, any]:
+        """
+        Escaneia um documento (PDF ou imagem) e extrai texto
+        
+        Args:
+            file_path: Caminho para o arquivo
+            file_type: Tipo do arquivo ('pdf', 'image', 'auto')
+            lang: Idioma para OCR
+            dpi: Resolução para PDFs
+            preprocess: Aplicar pré-processamento
+            enhance: Melhorar qualidade
+            pages: Páginas específicas para PDFs (None = todas)
+            
+        Returns:
+            Dicionário com resultados do scan
+        """
+        # Detectar tipo de arquivo
+        if file_type == 'auto':
+            ext = Path(file_path).suffix.lower()
+            if ext == '.pdf':
+                file_type = 'pdf'
+            elif ext in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+                file_type = 'image'
+            else:
+                raise ValueError(f"Tipo de arquivo não suportado: {ext}")
+        
+        if file_type == 'pdf':
+            return self.extract_text_from_pdf(
+                file_path, 
+                pages=pages, 
+                lang=lang, 
+                dpi=dpi,
+                preprocess=preprocess,
+                enhance=enhance
+            )
+        elif file_type == 'image':
+            image = Image.open(file_path)
+            result = self.extract_text_from_image(
+                image, 
+                lang=lang, 
+                preprocess=preprocess, 
+                enhance=enhance
+            )
+            return {
+                'full_text': result.get('text', ''),
+                'confidence': result.get('confidence', 0),
+                'word_count': result.get('word_count', 0),
+                'char_count': result.get('char_count', 0),
+                'pages': {1: result}
+            }
+        else:
+            raise ValueError(f"Tipo de arquivo inválido: {file_type}")
+    
+    def batch_scan(
+        self,
+        file_paths: List[str],
+        lang: str = 'por',
+        dpi: int = 300,
+        preprocess: bool = True,
+        enhance: bool = True
+    ) -> Dict[str, any]:
+        """
+        Escaneia múltiplos documentos em lote
+        
+        Args:
+            file_paths: Lista de caminhos de arquivos
+            lang: Idioma para OCR
+            dpi: Resolução para PDFs
+            preprocess: Aplicar pré-processamento
+            enhance: Melhorar qualidade
+            
+        Returns:
+            Dicionário com resultados de todos os documentos
+        """
+        results = {
+            'total_files': len(file_paths),
+            'processed_files': 0,
+            'files': {},
+            'errors': []
+        }
+        
+        for file_path in file_paths:
+            try:
+                file_result = self.scan_document(
+                    file_path,
+                    lang=lang,
+                    dpi=dpi,
+                    preprocess=preprocess,
+                    enhance=enhance
+                )
+                results['files'][file_path] = file_result
+                results['processed_files'] += 1
+            except Exception as e:
+                results['errors'].append({
+                    'file': file_path,
+                    'error': str(e)
+                })
+        
+        return results
+    
+    def is_available(self) -> bool:
+        """Verifica se as dependências necessárias estão disponíveis"""
+        return self.tesseract_available and self.pdf2image_available
+    
+    def is_opencv_available(self) -> bool:
+        """Verifica se OpenCV está disponível"""
+        return CV2_AVAILABLE
+    
+    def get_supported_languages(self) -> List[str]:
+        """Retorna lista de idiomas suportados pelo Tesseract"""
+        if not self.tesseract_available:
+            return []
+        
+        try:
+            langs = pytesseract.get_languages()
+            return langs
+        except:
+            return ['por', 'eng']  # Idiomas padrão
+
+
+def create_scanner() -> DocumentScanner:
+    """Factory function para criar instância do scanner"""
+    return DocumentScanner()
+
+
+# ============================================================================
+# PARTE 2: APLICAÇÃO STREAMLIT COMPLETA
+# ============================================================================
+
+import streamlit as st
 import zipfile
 import shutil
-from typing import List, Optional, Dict, Tuple
 import io
 import subprocess
-import numpy as np
 from collections import defaultdict
 
-# Imports diretos das bibliotecas (evita import circular com app.py da raiz)
-from pypdf import PdfReader, PdfWriter
-from pdf2image import convert_from_path
-from PIL import Image, ImageStat
+# Imports diretos das bibliotecas
+from pypdf import PdfWriter
 from pdfminer.high_level import extract_text
 from pdf2docx import Converter as PDF2DocxConverter
+
+# Verificar disponibilidade do scanner (agora no mesmo arquivo)
+SCANNER_AVAILABLE = TESSERACT_AVAILABLE and PDF2IMAGE_AVAILABLE
 
 # Registrar suporte para HEIC/HEIF
 try:
@@ -148,14 +549,15 @@ def main():
     # Sidebar para navegação
     st.sidebar.title("🔧 Ferramentas")
     
-    # Menu de opções - 4 seções principais
+    # Menu de opções - 5 seções principais
     section = st.sidebar.selectbox(
         "Escolha uma seção:",
         [
             "📤 Converter PDF para outros formatos",
             "📥 Converter arquivos em arquivos PDF",
             "📑 Gerenciar páginas",
-            "🗜️ Compactar e anotar"
+            "🗜️ Compactar e anotar",
+            "🔍 Escanear documentos (OCR)"
         ]
     )
     
@@ -167,6 +569,8 @@ def main():
         show_manage_pages()
     elif section == "🗜️ Compactar e anotar":
         show_compress_and_annotate()
+    elif section == "🔍 Escanear documentos (OCR)":
+        show_scan_documents()
 
 # ============================================================================
 # SEÇÃO 1: Converter PDF para outros formatos
@@ -1240,806 +1644,299 @@ def show_annotate_pdf():
             if st.button("🚀 Adicionar marca d'água", type="primary"):
                 st.info("🚧 Funcionalidade em desenvolvimento. Em breve você poderá adicionar marcas d'água aos PDFs.")
 
-def show_pdf_conversions():
-    st.header("📄 Conversões de PDF")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 Upload de PDF")
-        uploaded_file = st.file_uploader(
-            "Escolha um arquivo PDF",
-            type=['pdf'],
-            help="Faça upload do arquivo PDF que deseja converter"
-        )
-    
-    with col2:
-        st.subheader("⚙️ Opções de Conversão")
-        
-        conversion_type = st.selectbox(
-            "Tipo de conversão:",
-            ["PDF → Word (DOCX)", "PDF → Excel (XLSX)", "PDF → PowerPoint (PPTX)"]
-        )
-        
-        if conversion_type == "PDF → Word (DOCX)":
-            output_format = "docx"
-            output_name = "documento.docx"
-        elif conversion_type == "PDF → Excel (XLSX)":
-            output_format = "xlsx"
-            output_name = "planilha.xlsx"
-        else:  # PowerPoint
-            output_format = "pptx"
-            output_name = "apresentacao.pptx"
-    
-    if uploaded_file and st.button("🚀 Converter", type="primary"):
-        with st.spinner("Convertendo arquivo..."):
-            try:
-                # Salvar arquivo temporário
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
-                    tmp_path = tmp_file.name
-                
-                # Converter
-                if output_format == "docx":
-                    conv = PDF2DocxConverter(tmp_path)
-                    conv.convert(output_name)
-                    conv.close()
-                else:
-                    # Para Excel e PPT, usar LibreOffice
-                    temp_dir = tempfile.mkdtemp()
-                    converted_path = _libreoffice_convert(tmp_path, temp_dir, output_format)
-                    os.rename(converted_path, output_name)
-                
-                # Limpar arquivo temporário
-                os.unlink(tmp_path)
-                
-                # Download
-                with open(output_name, "rb") as file:
-                    st.download_button(
-                        label=f"📥 Baixar {output_name}",
-                        data=file.read(),
-                        file_name=output_name,
-                        mime="application/octet-stream"
-                    )
-                
-                st.success(f"✅ Conversão concluída! {output_name} está pronto para download.")
-                
-            except Exception as e:
-                st.error(f"❌ Erro na conversão: {str(e)}")
-            finally:
-                # Limpar arquivos gerados
-                if os.path.exists(output_name):
-                    os.remove(output_name)
+# ============================================================================
+# SEÇÃO 5: Escanear documentos (OCR)
+# ============================================================================
 
-def show_page_manipulation():
-    st.header("🔄 Manipulação de Páginas")
+def show_scan_documents():
+    """Interface para escanear documentos usando OCR"""
+    st.header("🔍 Escanear Documentos (OCR)")
     
-    col1, col2 = st.columns(2)
+    # Verificar status das dependências
+    missing_deps = []
+    if not TESSERACT_AVAILABLE:
+        missing_deps.append("pytesseract")
+    if not PDF2IMAGE_AVAILABLE:
+        missing_deps.append("pdf2image")
+    if not CV2_AVAILABLE:
+        missing_deps.append("opencv-python (opcional)")
     
-    with col1:
-        st.subheader("📤 Upload de PDF")
-        uploaded_file = st.file_uploader(
-            "Escolha um arquivo PDF",
-            type=['pdf'],
-            help="Faça upload do arquivo PDF que deseja manipular"
-        )
-    
-    with col2:
-        st.subheader("⚙️ Operações")
+    # Verificar se o scanner está disponível (pytesseract e pdf2image são obrigatórios)
+    if not SCANNER_AVAILABLE:
+        st.error("❌ Módulo de scanner não está disponível.")
         
-        operation = st.selectbox(
-            "Operação:",
-            ["Extrair páginas", "Girar páginas", "Remover páginas"]
-        )
+        # Mostrar quais dependências estão faltando
+        if missing_deps:
+            st.warning(f"⚠️ Dependências faltando: {', '.join([d for d in missing_deps if 'opcional' not in d])}")
         
-        if operation == "Extrair páginas":
-            pages_input = st.text_input(
-                "Páginas para extrair (ex: 1-3,7,10-12):",
-                placeholder="1-3,7,10-12",
-                help="Use números e intervalos separados por vírgula"
-            )
-        elif operation == "Girar páginas":
-            col_a, col_b = st.columns(2)
-            with col_a:
-                angle = st.selectbox("Ângulo:", ["90", "180", "270"])
-            with col_b:
-                pages_input = st.text_input(
-                    "Páginas para girar (vazio = todas):",
-                    placeholder="1,3,5 ou deixe vazio para todas"
-                )
-        else:  # Remover páginas
-            pages_input = st.text_input(
-                "Páginas para remover (ex: 2,5,8-10):",
-                placeholder="2,5,8-10",
-                help="Use números e intervalos separados por vírgula"
-            )
-    
-    if uploaded_file and st.button("🚀 Processar", type="primary"):
-        with st.spinner("Processando PDF..."):
-            try:
-                # Salvar arquivo temporário
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
-                    tmp_path = tmp_file.name
-                
-                reader = PdfReader(tmp_path)
-                writer = PdfWriter()
-                
-                if operation == "Extrair páginas":
-                    if not pages_input:
-                        st.error("❌ Especifique as páginas para extrair.")
-                        return
-                    indices = _parse_pages(pages_input, len(reader.pages))
-                    for i in indices:
-                        writer.add_page(reader.pages[i])
-                    output_name = "paginas_extraidas.pdf"
-                    
-                elif operation == "Girar páginas":
-                    indices = set(_parse_pages(pages_input, len(reader.pages))) if pages_input else set(range(len(reader.pages)))
-                    angle_val = int(angle)
-                    for i, page in enumerate(reader.pages):
-                        if i in indices:
-                            page.rotate(angle_val)
-                        writer.add_page(page)
-                    output_name = f"rotacionado_{angle}graus.pdf"
-                    
-                else:  # Remover páginas
-                    if not pages_input:
-                        st.error("❌ Especifique as páginas para remover.")
-                        return
-                    remove_set = set(_parse_pages(pages_input, len(reader.pages)))
-                    for i, page in enumerate(reader.pages):
-                        if i not in remove_set:
-                            writer.add_page(page)
-                    output_name = "paginas_removidas.pdf"
-                
-                # Salvar resultado
-                _save_writer(writer, output_name)
-                
-                # Limpar arquivo temporário
-                os.unlink(tmp_path)
-                
-                # Download
-                with open(output_name, "rb") as file:
-                    st.download_button(
-                        label=f"📥 Baixar {output_name}",
-                        data=file.read(),
-                        file_name=output_name,
-                        mime="application/pdf"
-                    )
-                
-                st.success(f"✅ Operação concluída! {output_name} está pronto para download.")
-                
-            except Exception as e:
-                st.error(f"❌ Erro no processamento: {str(e)}")
-            finally:
-                # Limpar arquivos gerados
-                if os.path.exists(output_name):
-                    os.remove(output_name)
-
-def show_image_conversions():
-    st.header("🖼️ PDF ↔ Imagens")
-    
-    col1, col2 = st.columns(2)
-    
-    # Inicializar variáveis para evitar UnboundLocalError
-    uploaded_file = None
-    uploaded_files = None
-    
-    with col1:
-        st.subheader("📤 Upload")
-        conversion_direction = st.radio(
-            "Direção da conversão:",
-            ["PDF → Imagens", "Imagens → PDF"]
-        )
-        
-        if conversion_direction == "PDF → Imagens":
-            uploaded_file = st.file_uploader(
-                "Escolha um arquivo PDF",
-                type=['pdf'],
-                help="Faça upload do arquivo PDF para converter em imagens"
-            )
-        else:
-            uploaded_files = st.file_uploader(
-                "Escolha imagens (PNG, JPG, JPEG, HEIC)",
-                type=['png', 'jpg', 'jpeg', 'heic', 'heif'],
-                accept_multiple_files=True,
-                help="Faça upload das imagens para converter em PDF. Arquivos HEIC serão convertidos automaticamente para JPEG."
-            )
-    
-    with col2:
-        st.subheader("⚙️ Configurações")
-        
-        if conversion_direction == "PDF → Imagens":
-            col_a, col_b = st.columns(2)
-            with col_a:
-                format_img = st.selectbox("Formato:", ["png", "jpeg"])
-            with col_b:
-                dpi = st.slider("DPI:", 100, 300, 200)
+        # Instruções detalhadas
+        with st.expander("📋 Instruções de Instalação", expanded=True):
+            st.markdown("""
+            **Para usar o scanner de documentos, você precisa instalar:**
             
+            ### 1. Bibliotecas Python (obrigatórias):
+            ```bash
+            pip install pytesseract pdf2image
+            ```
+            
+            ### 2. Tesseract OCR (obrigatório):
+            - **Windows**: Baixe e instale de https://github.com/UB-Mannheim/tesseract/wiki
+            - **Linux**: `sudo apt-get install tesseract-ocr` (Ubuntu/Debian) ou `sudo yum install tesseract` (CentOS/RHEL)
+            - **macOS**: `brew install tesseract`
+            
+            ### 3. Poppler (obrigatório para PDF):
+            - **Windows**: Baixe de https://github.com/oschwartz10612/poppler-windows/releases
+            - **Linux**: `sudo apt-get install poppler-utils`
+            - **macOS**: `brew install poppler`
+            
+            ### 4. OpenCV (opcional, melhora a qualidade):
+            ```bash
+            pip install opencv-python
+            ```
+            
+            **Nota**: O OpenCV é opcional. O scanner funcionará sem ele, mas com qualidade reduzida.
+            """)
+        
+        # Mostrar status detalhado
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            status = "✅" if TESSERACT_AVAILABLE else "❌"
+            st.markdown(f"**pytesseract**: {status}")
+        with col2:
+            status = "✅" if PDF2IMAGE_AVAILABLE else "❌"
+            st.markdown(f"**pdf2image**: {status}")
+        with col3:
+            status = "✅" if CV2_AVAILABLE else "⚠️ (opcional)"
+            st.markdown(f"**opencv-python**: {status}")
+        
+        return
+    
+    # Criar instância do scanner
+    try:
+        scanner = create_scanner()
+        if not scanner.is_available():
+            st.warning("⚠️ Dependências do scanner não estão totalmente disponíveis.")
+            st.info("""
+            **Dependências necessárias:**
+            - pytesseract
+            - Tesseract OCR instalado no sistema
+            - pdf2image
+            - poppler (para processar PDFs)
+            """)
+            return
+    except Exception as e:
+        st.error(f"❌ Erro ao inicializar scanner: {str(e)}")
+        import traceback
+        with st.expander("🔍 Detalhes do erro"):
+            st.code(traceback.format_exc())
+        return
+    
+    # Seleção de tipo de arquivo
+    file_type = st.radio(
+        "Tipo de documento:",
+        ["PDF", "Imagem"],
+        horizontal=True
+    )
+    
+    # Upload de arquivo
+    if file_type == "PDF":
+        uploaded_file = st.file_uploader(
+            "Escolha um arquivo PDF",
+            type=['pdf'],
+            help="Faça upload de um PDF para extrair texto usando OCR"
+        )
+    else:
+        uploaded_file = st.file_uploader(
+            "Escolha uma imagem",
+            type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
+            help="Faça upload de uma imagem de documento para extrair texto usando OCR"
+        )
+    
+    # Configurações de OCR
+    with st.expander("⚙️ Configurações Avançadas"):
+        lang = st.selectbox(
+            "Idioma:",
+            ["por", "eng", "por+eng"],
+            help="Idioma para reconhecimento de texto"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            dpi = st.slider(
+                "DPI (apenas PDF):",
+                150, 600, 300,
+                help="Resolução para conversão de PDF para imagem"
+            )
+            preprocess = st.checkbox(
+                "Pré-processar imagem",
+                value=True,
+                help="Aplica filtros para melhorar a qualidade do OCR"
+            )
+        with col2:
+            enhance = st.checkbox(
+                "Melhorar qualidade",
+                value=True,
+                help="Aumenta contraste e nitidez da imagem"
+            )
+        
+        # Seleção de páginas (apenas para PDF)
+        if file_type == "PDF" and uploaded_file:
             pages_input = st.text_input(
-                "Páginas (vazio = todas):",
-                placeholder="1,3,5 ou deixe vazio para todas"
+                "Páginas específicas (vazio = todas):",
+                placeholder="1,3,5-8 ou deixe vazio",
+                help="Especifique páginas para processar ou deixe vazio para todas"
             )
         else:
-            st.info("As imagens serão convertidas na ordem de upload.")
+            pages_input = None
     
-    if uploaded_file and conversion_direction == "PDF → Imagens" and st.button("🚀 Converter para Imagens", type="primary"):
-        with st.spinner("Convertendo PDF para imagens..."):
+    # Processar arquivo
+    if uploaded_file and st.button("🚀 Escanear Documento", type="primary"):
+        with st.spinner("Processando documento com OCR..."):
             try:
                 # Salvar arquivo temporário
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                file_ext = uploaded_file.name.split('.')[-1].lower()
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_path = tmp_file.name
                 
-                # Criar diretório temporário para imagens
-                temp_dir = tempfile.mkdtemp()
+                # Determinar páginas para processar
+                pages = None
+                if file_type == "PDF" and pages_input:
+                    reader = PdfReader(tmp_path)
+                    pages = _parse_pages(pages_input, len(reader.pages))
+                    # Converter para 1-based para o scanner
+                    pages = [p + 1 for p in pages]
                 
-                reader = PdfReader(tmp_path)
-                pages = _parse_pages(pages_input, len(reader.pages)) if pages_input else list(range(len(reader.pages)))
-                
-                # Converter páginas
-                for idx in pages:
-                    imgs = convert_from_path(tmp_path, dpi=dpi, first_page=idx + 1, last_page=idx + 1)
-                    img = imgs[0]
-                    output_path = os.path.join(temp_dir, f"pagina_{idx+1}.{format_img}")
-                    if format_img.lower() == "jpeg":
-                        img = img.convert("RGB")
-                    img.save(output_path, quality=95) if format_img.lower() == "jpeg" else img.save(output_path)
-                
-                # Criar ZIP com as imagens
-                zip_path = "imagens_convertidas.zip"
-                with zipfile.ZipFile(zip_path, 'w') as zip_file:
-                    for file_name in os.listdir(temp_dir):
-                        file_path = os.path.join(temp_dir, file_name)
-                        zip_file.write(file_path, file_name)
-                
-                # Limpar arquivos temporários
-                os.unlink(tmp_path)
-                shutil.rmtree(temp_dir)
-                
-                # Download
-                with open(zip_path, "rb") as file:
-                    st.download_button(
-                        label="📥 Baixar ZIP com imagens",
-                        data=file.read(),
-                        file_name=zip_path,
-                        mime="application/zip"
+                # Escanear documento
+                if file_type == "PDF":
+                    result = scanner.scan_document(
+                        tmp_path,
+                        file_type='pdf',
+                        lang=lang,
+                        dpi=dpi,
+                        preprocess=preprocess,
+                        enhance=enhance,
+                        pages=pages
                     )
-                
-                st.success(f"✅ Conversão concluída! {len(pages)} imagens geradas.")
-                
-            except Exception as e:
-                st.error(f"❌ Erro na conversão: {str(e)}")
-            finally:
-                # Limpar arquivos gerados
-                if os.path.exists(zip_path):
-                    os.remove(zip_path)
-    
-    elif uploaded_files and conversion_direction == "Imagens → PDF" and st.button("🚀 Converter para PDF", type="primary"):
-        with st.spinner("Convertendo imagens para PDF..."):
-            try:
-                pil_images = []
-                for uploaded_file in uploaded_files:
-                    # Verificar se é arquivo HEIC/HEIF
-                    file_ext = uploaded_file.name.split('.')[-1].lower()
-                    if file_ext in ['heic', 'heif']:
-                        # Converter HEIC para JPEG temporariamente
-                        img = Image.open(uploaded_file)
-                        # Converter para RGB se necessário
-                        if img.mode in ("RGBA", "P"):
-                            img = img.convert("RGB")
-                        pil_images.append(img)
-                    else:
-                        img = Image.open(uploaded_file)
-                        if img.mode in ("RGBA", "P"):
-                            img = img.convert("RGB")
-                        pil_images.append(img)
-                
-                if not pil_images:
-                    st.error("❌ Nenhuma imagem válida encontrada.")
-                    return
-                
-                # Criar PDF
-                output_name = "imagens_convertidas.pdf"
-                primeira, restantes = pil_images[0], pil_images[1:]
-                primeira.save(output_name, save_all=True, append_images=restantes)
-                
-                # Download
-                with open(output_name, "rb") as file:
-                    st.download_button(
-                        label="📥 Baixar PDF",
-                        data=file.read(),
-                        file_name=output_name,
-                        mime="application/pdf"
+                else:
+                    result = scanner.scan_document(
+                        tmp_path,
+                        file_type='image',
+                        lang=lang,
+                        preprocess=preprocess,
+                        enhance=enhance
                     )
-                
-                st.success(f"✅ Conversão concluída! PDF com {len(pil_images)} imagens gerado.")
-                
-            except Exception as e:
-                st.error(f"❌ Erro na conversão: {str(e)}")
-            finally:
-                # Limpar arquivos gerados
-                if os.path.exists(output_name):
-                    os.remove(output_name)
-
-def show_heic_to_jpeg():
-    st.header("🖼️ HEIC → JPEG")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 Upload de Arquivos HEIC")
-        uploaded_files = st.file_uploader(
-            "Escolha arquivos HEIC/HEIF",
-            type=['heic', 'heif'],
-            accept_multiple_files=True,
-            help="Faça upload dos arquivos HEIC para converter em JPEG"
-        )
-    
-    with col2:
-        st.subheader("⚙️ Configurações")
-        st.info("💡 Arquivos HEIC serão convertidos para JPEG com qualidade 95%")
-        quality = st.slider("Qualidade JPEG:", 50, 100, 95)
-        st.warning("⚠️ Requer pillow-heif instalado. Instale com: pip install pillow-heif")
-    
-    if uploaded_files and st.button("🚀 Converter para JPEG", type="primary"):
-        with st.spinner("Convertendo arquivos HEIC para JPEG..."):
-            try:
-                converted_files = []
-                temp_dir = tempfile.mkdtemp()
-                
-                for uploaded_file in uploaded_files:
-                    # Abrir imagem HEIC
-                    img = Image.open(uploaded_file)
-                    
-                    # Converter para RGB se necessário
-                    if img.mode in ("RGBA", "P"):
-                        img = img.convert("RGB")
-                    
-                    # Criar nome do arquivo de saída
-                    base_name = os.path.splitext(uploaded_file.name)[0]
-                    output_path = os.path.join(temp_dir, f"{base_name}.jpeg")
-                    
-                    # Salvar como JPEG
-                    img.save(output_path, "JPEG", quality=quality)
-                    converted_files.append((output_path, f"{base_name}.jpeg"))
-                
-                if not converted_files:
-                    st.error("❌ Nenhum arquivo convertido.")
-                    return
-                
-                # Se houver múltiplos arquivos, criar ZIP
-                if len(converted_files) > 1:
-                    zip_path = "heic_convertidos.zip"
-                    with zipfile.ZipFile(zip_path, 'w') as zip_file:
-                        for file_path, file_name in converted_files:
-                            zip_file.write(file_path, file_name)
-                    
-                    # Download do ZIP
-                    with open(zip_path, "rb") as file:
-                        st.download_button(
-                            label=f"📥 Baixar ZIP com {len(converted_files)} imagens JPEG",
-                            data=file.read(),
-                            file_name=zip_path,
-                            mime="application/zip"
-                        )
-                    st.success(f"✅ Conversão concluída! {len(converted_files)} arquivos convertidos para JPEG.")
-                    
-                    # Limpar ZIP
-                    if os.path.exists(zip_path):
-                        os.remove(zip_path)
-                else:
-                    # Download único
-                    file_path, file_name = converted_files[0]
-                    with open(file_path, "rb") as file:
-                        st.download_button(
-                            label=f"📥 Baixar {file_name}",
-                            data=file.read(),
-                            file_name=file_name,
-                            mime="image/jpeg"
-                        )
-                    st.success(f"✅ Conversão concluída! {file_name} está pronto para download.")
-                
-            except Exception as e:
-                error_msg = str(e)
-                if "heif" in error_msg.lower() or "heic" in error_msg.lower():
-                    st.error(f"❌ Erro: Não foi possível abrir o arquivo HEIC. Certifique-se de que pillow-heif está instalado: pip install pillow-heif")
-                else:
-                    st.error(f"❌ Erro na conversão: {error_msg}")
-            finally:
-                # Limpar arquivos temporários
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
-
-def calculate_sharpness(image: Image.Image) -> float:
-    """Calcula a nitidez de uma imagem usando Laplacian variance.
-    Valores maiores indicam imagens mais nítidas.
-    """
-    # Converter para escala de cinza se necessário
-    if image.mode != 'L':
-        gray = image.convert('L')
-    else:
-        gray = image
-    
-    # Converter para numpy array
-    img_array = np.array(gray, dtype=np.float64)
-    
-    # Aplicar filtro Laplacian usando convolução otimizada
-    # Kernel Laplacian 3x3
-    kernel = np.array([
-        [0, -1, 0],
-        [-1, 4, -1],
-        [0, -1, 0]
-    ], dtype=np.float64)
-    
-    # Aplicar convolução usando numpy (mais eficiente)
-    # Criar matriz de zeros para o resultado
-    h, w = img_array.shape
-    laplacian = np.zeros((h-2, w-2), dtype=np.float64)
-    
-    # Aplicar kernel
-    for i in range(h-2):
-        for j in range(w-2):
-            region = img_array[i:i+3, j:j+3]
-            laplacian[i, j] = np.sum(region * kernel)
-    
-    # Calcular variância do Laplacian (métrica de nitidez)
-    # Se a imagem for muito pequena, retornar 0
-    if laplacian.size == 0:
-        return 0.0
-    
-    variance = np.var(laplacian)
-    return float(variance)
-
-
-def calculate_image_hash(image: Image.Image, hash_size: int = 8) -> str:
-    """Calcula um hash perceptual simples da imagem para detectar duplicatas.
-    Retorna uma string representando o hash.
-    """
-    # Redimensionar para tamanho pequeno
-    small = image.resize((hash_size, hash_size), Image.Resampling.LANCZOS)
-    
-    # Converter para escala de cinza
-    gray = small.convert('L')
-    
-    # Calcular média
-    pixels = np.array(gray)
-    avg = pixels.mean()
-    
-    # Criar hash binário comparando cada pixel com a média
-    hash_bits = []
-    for pixel in pixels.flatten():
-        hash_bits.append('1' if pixel > avg else '0')
-    
-    return ''.join(hash_bits)
-
-
-def calculate_similarity(hash1: str, hash2: str) -> float:
-    """Calcula similaridade entre dois hashes (Hamming distance normalizada)."""
-    if len(hash1) != len(hash2):
-        return 0.0
-    
-    # Calcular Hamming distance
-    distance = sum(c1 != c2 for c1, c2 in zip(hash1, hash2))
-    
-    # Normalizar para 0-1 (0 = idêntico, 1 = completamente diferente)
-    similarity = 1.0 - (distance / len(hash1))
-    return similarity
-
-
-def group_duplicates(images_data: List[Tuple[str, Image.Image, str]]) -> Dict[str, List[int]]:
-    """Agrupa imagens duplicadas baseado em hash perceptual.
-    Retorna um dicionário onde a chave é o hash e o valor é lista de índices.
-    """
-    groups = defaultdict(list)
-    
-    for idx, (filename, image, hash_str) in enumerate(images_data):
-        groups[hash_str].append(idx)
-    
-    # Retornar apenas grupos com mais de uma imagem (duplicatas)
-    return {h: indices for h, indices in groups.items() if len(indices) > 1}
-
-
-def show_select_sharpest_images():
-    st.header("🔍 Selecionar Fotos Mais Nítidas")
-    
-    st.info("💡 Esta ferramenta analisa fotos de documentos duplicadas e seleciona automaticamente as mais nítidas de cada grupo.")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 Upload de Imagens")
-        uploaded_files = st.file_uploader(
-            "Escolha imagens de documentos",
-            type=['png', 'jpg', 'jpeg', 'heic', 'heif'],
-            accept_multiple_files=True,
-            help="Faça upload de múltiplas fotos. Imagens duplicadas serão detectadas e a mais nítida será selecionada."
-        )
-    
-    with col2:
-        st.subheader("⚙️ Configurações")
-        similarity_threshold = st.slider(
-            "Limiar de similaridade para duplicatas:",
-            0.70, 1.0, 0.85,
-            help="Quanto maior, mais similar as imagens precisam ser para serem consideradas duplicatas."
-        )
-        st.info("💡 A nitidez é calculada usando análise Laplacian (variação de gradientes)")
-    
-    if uploaded_files and st.button("🚀 Analisar e Selecionar", type="primary"):
-        with st.spinner("Analisando imagens e detectando duplicatas..."):
-            try:
-                images_data = []
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # Processar todas as imagens
-                total = len(uploaded_files)
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    status_text.text(f"Processando {idx + 1}/{total}: {uploaded_file.name}")
-                    progress_bar.progress((idx + 1) / total)
-                    
-                    try:
-                        # Abrir imagem
-                        img = Image.open(uploaded_file)
-                        
-                        # Converter HEIC se necessário
-                        if uploaded_file.name.lower().endswith(('.heic', '.heif')):
-                            if img.mode in ("RGBA", "P"):
-                                img = img.convert("RGB")
-                        
-                        # Calcular hash e nitidez
-                        img_hash = calculate_image_hash(img)
-                        sharpness = calculate_sharpness(img)
-                        
-                        images_data.append((uploaded_file.name, img, img_hash, sharpness))
-                    except Exception as e:
-                        st.warning(f"⚠️ Não foi possível processar {uploaded_file.name}: {str(e)}")
-                        continue
-                
-                if not images_data:
-                    st.error("❌ Nenhuma imagem válida foi processada.")
-                    return
-                
-                status_text.text("Detectando duplicatas...")
-                
-                # Agrupar por hash exato primeiro
-                hash_groups = defaultdict(list)
-                for idx, (filename, img, img_hash, sharpness) in enumerate(images_data):
-                    hash_groups[img_hash].append((idx, filename, sharpness))
-                
-                # Agrupar por similaridade (hash com pequenas diferenças)
-                all_groups = []
-                processed_indices = set()
-                
-                for hash_key, items in hash_groups.items():
-                    if len(items) > 1:
-                        # Já é um grupo de duplicatas
-                        all_groups.append([idx for idx, _, _ in items])
-                        processed_indices.update([idx for idx, _, _ in items])
-                    else:
-                        # Verificar similaridade com outros hashes
-                        idx, filename, sharpness = items[0]
-                        if idx not in processed_indices:
-                            similar_group = [idx]
-                            for other_hash, other_items in hash_groups.items():
-                                if other_hash != hash_key:
-                                    similarity = calculate_similarity(hash_key, other_hash)
-                                    if similarity >= similarity_threshold:
-                                        for other_idx, other_filename, other_sharpness in other_items:
-                                            if other_idx not in processed_indices:
-                                                similar_group.append(other_idx)
-                                                processed_indices.add(other_idx)
-                            
-                            if len(similar_group) > 1:
-                                all_groups.append(similar_group)
-                            else:
-                                processed_indices.add(idx)
-                
-                # Selecionar a mais nítida de cada grupo
-                selected_indices = []
-                selection_details = []
-                
-                if all_groups:
-                    for group_idx, group in enumerate(all_groups):
-                        # Encontrar a imagem mais nítida no grupo
-                        best_idx = max(group, key=lambda i: images_data[i][3])  # images_data[i][3] é a nitidez
-                        selected_indices.append(best_idx)
-                        
-                        # Criar detalhes do grupo
-                        group_files = [images_data[i][0] for i in group]
-                        best_file = images_data[best_idx][0]
-                        best_sharpness = images_data[best_idx][3]
-                        other_files = [images_data[i][0] for i in group if i != best_idx]
-                        
-                        selection_details.append({
-                            'group': group_idx + 1,
-                            'best_file': best_file,
-                            'best_sharpness': best_sharpness,
-                            'other_files': other_files,
-                            'total_in_group': len(group)
-                        })
-                else:
-                    st.info("ℹ️ Nenhuma duplicata detectada. Todas as imagens são únicas.")
-                
-                # Adicionar imagens únicas (não duplicadas)
-                for idx, (filename, img, img_hash, sharpness) in enumerate(images_data):
-                    if idx not in processed_indices:
-                        selected_indices.append(idx)
                 
                 # Mostrar resultados
-                st.subheader("📊 Resultados da Análise")
+                st.success("✅ Documento escaneado com sucesso!")
                 
-                if selection_details:
-                    st.write(f"**{len(selection_details)} grupo(s) de duplicatas detectado(s)**")
-                    
-                    for detail in selection_details:
-                        with st.expander(f"Grupo {detail['group']}: {detail['best_file']} (Nitidez: {detail['best_sharpness']:.2f})"):
-                            st.write(f"✅ **Selecionada:** {detail['best_file']}")
-                            st.write(f"📊 **Nitidez:** {detail['best_sharpness']:.2f}")
-                            st.write(f"📁 **Total no grupo:** {detail['total_in_group']} imagens")
-                            if detail['other_files']:
-                                st.write(f"❌ **Removidas:** {', '.join(detail['other_files'])}")
+                # Estatísticas
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    if 'total_pages' in result:
+                        st.metric("Total de Páginas", result.get('total_pages', 0))
+                    else:
+                        st.metric("Tipo", "Imagem")
+                with col2:
+                    st.metric("Palavras", result.get('word_count', result.get('total_words', 0)))
+                with col3:
+                    st.metric("Caracteres", result.get('char_count', result.get('total_chars', 0)))
+                with col4:
+                    confidence = result.get('confidence', result.get('avg_confidence', 0))
+                    st.metric("Confiança OCR", f"{confidence:.1f}%")
                 
-                # Preparar download das imagens selecionadas
-                temp_dir = tempfile.mkdtemp()
-                selected_files = []
+                # Mostrar texto extraído
+                st.subheader("📄 Texto Extraído")
                 
-                for idx in selected_indices:
-                    filename, img, img_hash, sharpness = images_data[idx]
-                    
-                    # Salvar imagem
-                    base_name = os.path.splitext(filename)[0]
-                    output_path = os.path.join(temp_dir, filename)
-                    
-                    # Converter para RGB se necessário
-                    if img.mode in ("RGBA", "P"):
-                        img = img.convert("RGB")
-                    
-                    img.save(output_path)
-                    selected_files.append((output_path, filename))
-                
-                # Criar ZIP com imagens selecionadas
-                if len(selected_files) > 1:
-                    zip_path = "fotos_selecionadas.zip"
-                    with zipfile.ZipFile(zip_path, 'w') as zip_file:
-                        for file_path, file_name in selected_files:
-                            zip_file.write(file_path, file_name)
-                    
-                    # Download
-                    with open(zip_path, "rb") as file:
-                        st.download_button(
-                            label=f"📥 Baixar ZIP com {len(selected_files)} fotos selecionadas",
-                            data=file.read(),
-                            file_name=zip_path,
-                            mime="application/zip"
-                        )
-                    
-                    st.success(f"✅ Análise concluída! {len(selected_files)} foto(s) selecionada(s) de {total} total.")
-                    
-                    # Limpar ZIP
-                    if os.path.exists(zip_path):
-                        os.remove(zip_path)
+                if 'pages' in result and len(result['pages']) > 1:
+                    # Múltiplas páginas - mostrar em abas
+                    tabs = st.tabs([f"Página {p}" for p in result['pages'].keys()])
+                    for idx, (page_num, page_data) in enumerate(result['pages'].items()):
+                        with tabs[idx]:
+                            st.text_area(
+                                f"Texto da página {page_num}:",
+                                page_data.get('text', ''),
+                                height=300,
+                                key=f"page_{page_num}"
+                            )
+                            if 'confidence' in page_data:
+                                st.caption(f"Confiança: {page_data['confidence']:.1f}%")
                 else:
-                    st.warning("⚠️ Apenas 1 imagem selecionada. Não será criado ZIP.")
-                
-                progress_bar.empty()
-                status_text.empty()
-                
-            except Exception as e:
-                st.error(f"❌ Erro na análise: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-            finally:
-                # Limpar arquivos temporários
-                if 'temp_dir' in locals() and os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
-
-def show_office_conversions():
-    st.header("📊 Office ↔ PDF")
-    
-    st.info("⚠️ Conversões Office requerem LibreOffice instalado. Funcionalidade limitada em ambiente web.")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 Upload")
-        uploaded_file = st.file_uploader(
-            "Escolha um arquivo Office ou PDF",
-            type=['pdf', 'docx', 'xlsx', 'pptx'],
-            help="Faça upload do arquivo para converter"
-        )
-    
-    with col2:
-        st.subheader("⚙️ Conversão")
-        if uploaded_file:
-            file_type = uploaded_file.name.split('.')[-1].lower()
-            
-            if file_type == 'pdf':
-                conversion_options = ["PDF → Word", "PDF → Excel", "PDF → PowerPoint"]
-            else:
-                conversion_options = [f"{file_type.upper()} → PDF"]
-            
-            conversion = st.selectbox("Converter para:", conversion_options)
-    
-    if uploaded_file and st.button("🚀 Converter", type="primary"):
-        st.warning("⚠️ Conversões Office podem não funcionar em ambiente web devido a dependências do LibreOffice.")
-
-def show_text_extractions():
-    st.header("📝 Extração de Texto")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 Upload de PDF")
-        uploaded_file = st.file_uploader(
-            "Escolha um arquivo PDF",
-            type=['pdf'],
-            help="Faça upload do arquivo PDF para extrair texto"
-        )
-    
-    with col2:
-        st.subheader("⚙️ Formato de Saída")
-        output_format = st.selectbox(
-            "Formato:",
-            ["HTML", "XML", "Texto Simples"]
-        )
-    
-    if uploaded_file and st.button("🚀 Extrair Texto", type="primary"):
-        with st.spinner("Extraindo texto..."):
-            try:
-                # Salvar arquivo temporário
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
-                    tmp_path = tmp_file.name
-                
-                # Extrair texto
-                texto = extract_text(tmp_path) or ""
-                
-                if output_format == "HTML":
-                    content = f"""<!DOCTYPE html><html lang="pt-br"><meta charset="utf-8"><body><pre>{texto}</pre></body></html>"""
-                    output_name = "texto_extraido.html"
-                    mime_type = "text/html"
-                elif output_format == "XML":
-                    content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<documento>
-  <conteudo>{texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</conteudo>
-</documento>"""
-                    output_name = "texto_extraido.xml"
-                    mime_type = "application/xml"
-                else:  # Texto simples
-                    content = texto
-                    output_name = "texto_extraido.txt"
-                    mime_type = "text/plain"
-                
-                # Salvar arquivo
-                with open(output_name, "w", encoding="utf-8") as f:
-                    f.write(content)
-                
-                # Limpar arquivo temporário
-                os.unlink(tmp_path)
-                
-                # Download
-                with open(output_name, "rb") as file:
-                    st.download_button(
-                        label=f"📥 Baixar {output_name}",
-                        data=file.read(),
-                        file_name=output_name,
-                        mime=mime_type
+                    # Texto único
+                    full_text = result.get('full_text', result.get('text', ''))
+                    st.text_area(
+                        "Texto extraído:",
+                        full_text,
+                        height=400
                     )
                 
-                # Mostrar preview do texto
-                st.subheader("👀 Preview do Texto")
-                st.text_area("Texto extraído:", texto, height=200)
+                # Opções de download
+                st.subheader("💾 Download")
                 
-                st.success(f"✅ Extração concluída! {output_name} está pronto para download.")
+                # Obter texto completo para download
+                full_text = result.get('full_text', result.get('text', ''))
+                
+                # Salvar texto em arquivo
+                output_name = f"texto_extraido_{Path(uploaded_file.name).stem}.txt"
+                html_name = f"texto_extraido_{Path(uploaded_file.name).stem}.html"
+                
+                with open(output_name, "w", encoding="utf-8") as f:
+                    f.write(full_text)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    with open(output_name, "rb") as file:
+                        st.download_button(
+                            label="📥 Baixar como TXT",
+                            data=file.read(),
+                            file_name=output_name,
+                            mime="text/plain"
+                        )
+                
+                with col2:
+                    # Criar HTML formatado
+                    html_content = f"""<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <title>Texto Extraído - {uploaded_file.name}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
+    </style>
+</head>
+<body>
+    <h1>Texto Extraído de: {uploaded_file.name}</h1>
+    <pre>{full_text.replace('<', '&lt;').replace('>', '&gt;')}</pre>
+</body>
+</html>"""
+                    with open(html_name, "w", encoding="utf-8") as f:
+                        f.write(html_content)
+                    
+                    with open(html_name, "rb") as file:
+                        st.download_button(
+                            label="📥 Baixar como HTML",
+                            data=file.read(),
+                            file_name=html_name,
+                            mime="text/html"
+                        )
+                
+                # Limpar arquivos temporários
+                os.unlink(tmp_path)
                 
             except Exception as e:
-                st.error(f"❌ Erro na extração: {str(e)}")
+                st.error(f"❌ Erro ao escanear documento: {str(e)}")
+                import traceback
+                with st.expander("🔍 Detalhes do erro"):
+                    st.code(traceback.format_exc())
             finally:
                 # Limpar arquivos gerados
-                if os.path.exists(output_name):
-                    os.remove(output_name)
+                for file_name in [output_name, html_name]:
+                    if 'file_name' in locals() and os.path.exists(file_name):
+                        try:
+                            os.remove(file_name)
+                        except:
+                            pass
 
 if __name__ == "__main__":
     main()
