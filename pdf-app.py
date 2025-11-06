@@ -2078,7 +2078,10 @@ def show_scan_documents():
         horizontal=True
     )
     
-    # Upload de arquivo
+    # Upload de arquivo ou captura de foto
+    uploaded_file = None
+    camera_image = None
+    
     if file_type == "PDF":
         uploaded_file = st.file_uploader(
             "Escolha um arquivo PDF",
@@ -2086,11 +2089,26 @@ def show_scan_documents():
             help="Faça upload de um PDF para extrair texto usando OCR"
         )
     else:
-        uploaded_file = st.file_uploader(
-            "Escolha uma imagem",
-            type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
-            help="Faça upload de uma imagem de documento para extrair texto usando OCR"
+        # Opção para capturar foto ou fazer upload
+        input_method = st.radio(
+            "Como deseja fornecer a imagem?",
+            ["📷 Tirar foto", "📁 Fazer upload"],
+            horizontal=True
         )
+        
+        if input_method == "📷 Tirar foto":
+            camera_image = st.camera_input(
+                "Tire uma foto do documento",
+                help="Use a câmera do dispositivo para capturar o documento"
+            )
+            if camera_image:
+                uploaded_file = camera_image
+        else:
+            uploaded_file = st.file_uploader(
+                "Escolha uma imagem",
+                type=['png', 'jpg', 'jpeg', 'tiff', 'bmp', 'heic', 'heif'],
+                help="Faça upload de uma imagem de documento para extrair texto usando OCR"
+            )
     
     # Configurações de OCR
     with st.expander("⚙️ Configurações Avançadas"):
@@ -2134,10 +2152,18 @@ def show_scan_documents():
         with st.spinner("Processando documento com OCR..."):
             try:
                 # Salvar arquivo temporário
-                file_ext = uploaded_file.name.split('.')[-1].lower()
+                if uploaded_file.name:
+                    file_ext = uploaded_file.name.split('.')[-1].lower()
+                else:
+                    # Se não tiver nome (câmera), usar jpg como padrão
+                    file_ext = 'jpg'
+                
                 with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_path = tmp_file.name
+                
+                # Manter referência ao caminho para uso posterior
+                original_image_path = tmp_path
                 
                 # Determinar páginas para processar
                 pages = None
@@ -2159,6 +2185,18 @@ def show_scan_documents():
                         pages=pages
                     )
                 else:
+                    # Para imagens, verificar se o arquivo foi salvo corretamente
+                    if not os.path.exists(tmp_path):
+                        raise FileNotFoundError(f"Arquivo temporário não encontrado: {tmp_path}")
+                    
+                    # Verificar se é uma imagem válida
+                    try:
+                        test_image = Image.open(tmp_path)
+                        test_image.verify()
+                    except Exception as img_error:
+                        st.warning(f"⚠️ Aviso sobre a imagem: {str(img_error)}")
+                    
+                    # Processar OCR
                     result = scanner.scan_document(
                         tmp_path,
                         file_type='image',
@@ -2166,6 +2204,31 @@ def show_scan_documents():
                         preprocess=preprocess,
                         enhance=enhance
                     )
+                    
+                    # Verificar se o OCR retornou resultados válidos
+                    if result.get('word_count', 0) == 0 and result.get('char_count', 0) == 0:
+                        st.warning("""
+                        ⚠️ **Nenhum texto foi detectado na imagem.**
+                        
+                        Possíveis causas:
+                        - A imagem pode não conter texto legível
+                        - A qualidade da imagem pode estar baixa
+                        - O idioma selecionado pode não corresponder ao texto na imagem
+                        - Tente desativar o pré-processamento ou melhorar a qualidade da imagem
+                        """)
+                        
+                        # Mostrar preview da imagem para debug
+                        with st.expander("🔍 Visualizar imagem processada"):
+                            try:
+                                img = Image.open(tmp_path)
+                                st.image(img, caption="Imagem original", use_container_width=True)
+                                
+                                # Tentar mostrar imagem processada
+                                if preprocess or enhance:
+                                    processed_img = scanner.preprocess_image(img, enhance_quality=enhance)
+                                    st.image(processed_img, caption="Imagem processada", use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Erro ao visualizar imagem: {str(e)}")
                 
                 # Mostrar resultados
                 st.success("✅ Documento escaneado com sucesso!")
@@ -2216,14 +2279,72 @@ def show_scan_documents():
                 # Obter texto completo para download
                 full_text = result.get('full_text', result.get('text', ''))
                 
-                # Salvar texto em arquivo
-                output_name = f"texto_extraido_{Path(uploaded_file.name).stem}.txt"
-                html_name = f"texto_extraido_{Path(uploaded_file.name).stem}.html"
+                # Preparar nomes de arquivo
+                base_name = Path(uploaded_file.name).stem if uploaded_file.name else "documento"
+                output_name = f"texto_extraido_{base_name}.txt"
+                html_name = f"texto_extraido_{base_name}.html"
                 
+                # Usar session_state para manter o PDF criado
+                pdf_key = f"pdf_{base_name}"
+                if pdf_key not in st.session_state:
+                    st.session_state[pdf_key] = None
+                pdf_name = st.session_state[pdf_key]
+                
+                # Salvar texto em arquivo
                 with open(output_name, "w", encoding="utf-8") as f:
                     f.write(full_text)
                 
-                col1, col2 = st.columns(2)
+                # Se for imagem, oferecer opção de converter para PDF
+                if file_type == "Imagem" and uploaded_file:
+                    st.info("💡 Você também pode converter esta imagem em PDF!")
+                    
+                    # Criar colunas para botão e preview
+                    col_btn, col_preview = st.columns([1, 1])
+                    
+                    with col_btn:
+                        if st.button("📄 Converter Imagem para PDF", type="primary", key="convert_to_pdf"):
+                            try:
+                                # Ler a imagem original do arquivo temporário
+                                if os.path.exists(original_image_path):
+                                    image = Image.open(original_image_path)
+                                else:
+                                    # Se o arquivo foi deletado, tentar recriar do upload
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
+                                        tmp_file.write(uploaded_file.getvalue())
+                                        original_image_path = tmp_file.name
+                                    image = Image.open(original_image_path)
+                                
+                                # Converter para RGB se necessário
+                                if image.mode in ("RGBA", "P", "LA"):
+                                    image = image.convert("RGB")
+                                
+                                # Criar PDF
+                                pdf_name = f"documento_{base_name}.pdf"
+                                image.save(pdf_name, "PDF", resolution=300.0)
+                                
+                                # Salvar no session_state
+                                st.session_state[pdf_key] = pdf_name
+                                
+                                st.success("✅ PDF criado com sucesso!")
+                                st.rerun()  # Recarregar para mostrar o botão de download
+                            except Exception as e:
+                                st.error(f"❌ Erro ao criar PDF: {str(e)}")
+                                import traceback
+                                with st.expander("🔍 Detalhes do erro"):
+                                    st.code(traceback.format_exc())
+                    
+                    with col_preview:
+                        # Mostrar preview da imagem
+                        try:
+                            if os.path.exists(original_image_path):
+                                preview_img = Image.open(original_image_path)
+                                st.image(preview_img, caption="Imagem a converter", use_container_width=True, width=200)
+                        except:
+                            pass
+                
+                # Botões de download
+                col1, col2, col3 = st.columns(3)
+                
                 with col1:
                     with open(output_name, "rb") as file:
                         st.download_button(
@@ -2239,14 +2360,14 @@ def show_scan_documents():
 <html lang="pt-br">
 <head>
     <meta charset="utf-8">
-    <title>Texto Extraído - {uploaded_file.name}</title>
+    <title>Texto Extraído - {base_name}</title>
     <style>
         body {{ font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }}
         pre {{ white-space: pre-wrap; word-wrap: break-word; }}
     </style>
 </head>
 <body>
-    <h1>Texto Extraído de: {uploaded_file.name}</h1>
+    <h1>Texto Extraído de: {base_name}</h1>
     <pre>{full_text.replace('<', '&lt;').replace('>', '&gt;')}</pre>
 </body>
 </html>"""
@@ -2261,8 +2382,21 @@ def show_scan_documents():
                             mime="text/html"
                         )
                 
-                # Limpar arquivos temporários
-                os.unlink(tmp_path)
+                with col3:
+                    # Download do PDF se foi criado
+                    if pdf_name and os.path.exists(pdf_name):
+                        with open(pdf_name, "rb") as file:
+                            st.download_button(
+                                label="📥 Baixar PDF",
+                                data=file.read(),
+                                file_name=pdf_name,
+                                mime="application/pdf"
+                            )
+                    elif file_type == "Imagem":
+                        st.caption("Clique em 'Converter Imagem para PDF' acima")
+                
+                # Limpar arquivos temporários (mas manter se for imagem para conversão PDF)
+                # O arquivo será limpo na próxima execução ou quando a sessão terminar
                 
             except Exception as e:
                 st.error(f"❌ Erro ao escanear documento: {str(e)}")
@@ -2270,13 +2404,9 @@ def show_scan_documents():
                 with st.expander("🔍 Detalhes do erro"):
                     st.code(traceback.format_exc())
             finally:
-                # Limpar arquivos gerados
-                for file_name in [output_name, html_name]:
-                    if 'file_name' in locals() and os.path.exists(file_name):
-                        try:
-                            os.remove(file_name)
-                        except:
-                            pass
+                # Limpar arquivos gerados após um tempo (não imediatamente para permitir download)
+                # Em produção, você pode usar um sistema de limpeza automática
+                pass
 
 if __name__ == "__main__":
     main()
