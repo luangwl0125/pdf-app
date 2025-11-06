@@ -438,44 +438,355 @@ except ImportError:
 
 # Configuração da página
 st.set_page_config(
-    page_title="PDF Tools - Web App",
+    page_title="OriaPsi Docs - Assistente para Documentos",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS personalizado
+# CSS personalizado - Tema OriaPsi
 st.markdown("""
 <style>
+    :root {
+        --aurora-blue: #b3e0ff;
+        --aurora-lilac: #b8aaff;
+        --aurora-gold: #ffe6b3;
+        --dark-bg: #0a0a0f;
+        --light-bg: #1a1a2e;
+        --card-bg: #232336;
+        --accent: #b8aaff;
+        --text-main: #f4f4f8;
+        --text-soft: #b3b3c6;
+        --btn-gradient: linear-gradient(135deg, #b3e0ff 0%, #b8aaff 50%, #ffe6b3 100%);
+        --success: #4ade80;
+        --warning: #fbbf24;
+        --error: #f87171;
+        --border-color: #2a2a3e;
+    }
+
+    /* Override Streamlit default styles */
+    .stApp {
+        background: var(--dark-bg);
+        color: var(--text-main);
+        font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    /* Header */
     .main-header {
         font-size: 3rem;
-        font-weight: bold;
+        font-weight: 700;
         text-align: center;
-        color: #1f77b4;
-        margin-bottom: 2rem;
+        background: var(--btn-gradient);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 1rem;
     }
+
+    .page-subtitle {
+        text-align: center;
+        font-size: 1.1rem;
+        color: var(--text-soft);
+        margin-bottom: 3rem;
+    }
+
+    /* Sidebar */
+    .css-1d391kg {
+        background: var(--card-bg);
+        border-right: 1px solid var(--border-color);
+    }
+
+    [data-testid="stSidebar"] {
+        background: var(--card-bg);
+    }
+
+    [data-testid="stSidebar"] .css-1d391kg {
+        background: var(--card-bg);
+    }
+
+    /* Sidebar selectbox */
+    .stSelectbox label,
+    .stSelectbox > div > div {
+        color: var(--text-main);
+    }
+
+    /* Main content area */
+    .main .block-container {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-top: 2rem;
+    }
+
+    /* Headers */
+    h1, h2, h3 {
+        color: var(--accent);
+    }
+
+    h1 {
+        font-weight: 700;
+    }
+
+    h2 {
+        font-weight: 600;
+        font-size: 1.5rem;
+    }
+
+    /* Info boxes */
+    .stInfo {
+        background: rgba(184, 170, 255, 0.1);
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        color: var(--text-soft);
+    }
+
+    .stSuccess {
+        background: rgba(74, 222, 128, 0.1);
+        border: 1px solid var(--success);
+        border-radius: 8px;
+        color: var(--success);
+    }
+
+    .stWarning {
+        background: rgba(251, 191, 36, 0.1);
+        border: 1px solid var(--warning);
+        border-radius: 8px;
+        color: var(--warning);
+    }
+
+    .stError {
+        background: rgba(248, 113, 113, 0.1);
+        border: 1px solid var(--error);
+        border-radius: 8px;
+        color: var(--error);
+    }
+
+    /* Buttons */
+    .stButton > button {
+        background: var(--btn-gradient);
+        color: var(--dark-bg);
+        border: none;
+        border-radius: 8px;
+        font-weight: 700;
+        padding: 0.75rem 1.5rem;
+        transition: all 0.3s;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 20px rgba(184, 170, 255, 0.4);
+    }
+
+    .stDownloadButton > button {
+        background: var(--btn-gradient);
+        color: var(--dark-bg);
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+    }
+
+    /* File uploader */
+    .stFileUploader {
+        border: 2px dashed var(--border-color);
+        border-radius: 12px;
+        padding: 2rem;
+        background: var(--light-bg);
+        transition: all 0.3s;
+    }
+
+    .stFileUploader:hover {
+        border-color: var(--accent);
+        background: rgba(184, 170, 255, 0.05);
+    }
+
+    /* Inputs */
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input,
+    .stSelectbox > div > div > div {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-main);
+    }
+
+    .stTextInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus {
+        border-color: var(--accent);
+    }
+
+    /* Sliders */
+    .stSlider {
+        color: var(--accent);
+    }
+
+    .stSlider > div > div > div {
+        background: var(--accent);
+    }
+
+    /* Radio buttons */
+    .stRadio > div {
+        background: var(--light-bg);
+        border-radius: 8px;
+        padding: 1rem;
+    }
+
+    .stRadio label {
+        color: var(--text-main);
+    }
+
+    /* Text areas */
+    .stTextArea > div > div > textarea {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-main);
+    }
+
+    /* Metrics */
+    .stMetric {
+        background: var(--light-bg);
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+    }
+
+    .stMetric label {
+        color: var(--text-soft);
+    }
+
+    .stMetric [data-testid="stMetricValue"] {
+        color: var(--accent);
+        font-weight: 700;
+    }
+
+    /* Expanders */
+    .stExpander {
+        background: var(--light-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+    }
+
+    .stExpander label {
+        color: var(--text-main);
+        font-weight: 600;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        background: var(--light-bg);
+        border-radius: 8px;
+        padding: 0.5rem;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        color: var(--text-soft);
+    }
+
+    .stTabs [aria-selected="true"] {
+        color: var(--accent);
+        background: var(--card-bg);
+    }
+
+    /* Columns */
+    [data-testid="column"] {
+        background: transparent;
+    }
+
+    /* Progress bars */
+    .stProgress > div > div > div {
+        background: var(--btn-gradient);
+    }
+
+    /* Code blocks */
+    .stCodeBlock {
+        background: var(--light-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+    }
+
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Custom card style */
     .feature-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid #1f77b4;
+        background: var(--light-bg);
+        padding: 1.5rem;
+        border-radius: 12px;
+        margin: 1rem 0;
+        border-left: 4px solid var(--accent);
     }
-    .success-message {
-        background-color: #d4edda;
-        color: #155724;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 1px solid #c3e6cb;
+
+    /* Section header */
+    .section-header {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--accent);
+        margin-bottom: 2rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
     }
-    .error-message {
-        background-color: #f8d7da;
-        color: #721c24;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 1px solid #f5c6cb;
+
+    /* Checkboxes */
+    .stCheckbox label {
+        color: var(--text-main);
+    }
+
+    /* Selectbox dropdown */
+    [data-baseweb="select"] {
+        background: var(--card-bg);
+    }
+
+    /* Spinner */
+    .stSpinner > div {
+        border-color: var(--accent);
+    }
+
+    /* Caption */
+    .stCaption {
+        color: var(--text-soft);
+    }
+
+    /* Markdown text */
+    .stMarkdown {
+        color: var(--text-main);
+    }
+
+    .stMarkdown code {
+        background: var(--light-bg);
+        color: var(--accent);
+        padding: 0.2rem 0.4rem;
+        border-radius: 4px;
+    }
+
+    /* Dataframe */
+    .stDataFrame {
+        background: var(--light-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+    }
+
+    /* JSON viewer */
+    .stJson {
+        background: var(--light-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .main-header {
+            font-size: 2rem;
+        }
+        
+        .main .block-container {
+            padding: 1rem;
+        }
     }
 </style>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 """, unsafe_allow_html=True)
 
 # Utilitários locais
@@ -555,10 +866,12 @@ def _libreoffice_convert(input_path: str, output_dir: str, target_filter: str) -
 
 
 def main():
-    st.markdown('<h1 class="main-header">📄 PDF Tools - Web App</h1>', unsafe_allow_html=True)
+    # Header com estilo OriaPsi
+    st.markdown('<h1 class="main-header">📄 OriaPsi Docs</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="page-subtitle">Assistente para Documentos Psicológicos conforme CFP</p>', unsafe_allow_html=True)
     
     # Sidebar para navegação
-    st.sidebar.title("🔧 Ferramentas")
+    st.sidebar.markdown("### 🔧 Ferramentas")
     
     # Menu de opções - 5 seções principais
     section = st.sidebar.selectbox(
@@ -569,7 +882,8 @@ def main():
             "📑 Gerenciar páginas",
             "🗜️ Compactar e anotar",
             "🔍 Escanear documentos (OCR)"
-        ]
+        ],
+        label_visibility="collapsed"
     )
     
     if section == "📤 Converter PDF para outros formatos":
