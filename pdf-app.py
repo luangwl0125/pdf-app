@@ -147,41 +147,88 @@ class DocumentScanner:
             processed_image = self.enhance_image(processed_image)
         
         # Extrair texto usando Tesseract
-        try:
-            # Configuração do Tesseract para melhor precisão
-            custom_config = r'--oem 3 --psm 6'
-            
-            # Extrair texto simples
-            text = pytesseract.image_to_string(processed_image, lang=lang, config=custom_config)
-            
-            # Extrair dados estruturados
-            data = pytesseract.image_to_data(
-                processed_image, 
-                lang=lang, 
-                config=custom_config,
-                output_type=pytesseract.Output.DICT
-            )
-            
-            # Extrair informações de confiança
-            confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
-            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
-            
-            return {
-                'text': text.strip(),
-                'confidence': avg_confidence,
-                'word_count': len(text.split()),
-                'char_count': len(text),
-                'data': data
-            }
-        except Exception as e:
-            return {
-                'text': '',
-                'confidence': 0,
-                'word_count': 0,
-                'char_count': 0,
-                'error': str(e),
-                'data': {}
-            }
+        # Tentar múltiplas configurações para melhorar detecção
+        configs_to_try = [
+            r'--oem 3 --psm 6',  # Padrão: bloco uniforme de texto
+            r'--oem 3 --psm 11',  # Texto esparso
+            r'--oem 3 --psm 12',  # Texto com OSD
+            r'--oem 3 --psm 3',   # Totalmente automático
+            r'--oem 3 --psm 1',   # Orientação e detecção de script automática
+        ]
+        
+        best_result = {
+            'text': '',
+            'confidence': 0,
+            'word_count': 0,
+            'char_count': 0,
+            'data': {}
+        }
+        
+        for config in configs_to_try:
+            try:
+                # Extrair texto simples
+                text = pytesseract.image_to_string(processed_image, lang=lang, config=config)
+                
+                # Extrair dados estruturados
+                data = pytesseract.image_to_data(
+                    processed_image, 
+                    lang=lang, 
+                    config=config,
+                    output_type=pytesseract.Output.DICT
+                )
+                
+                # Extrair informações de confiança
+                confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
+                avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+                
+                word_count = len([w for w in text.split() if w.strip()])
+                char_count = len(text.strip())
+                
+                # Se encontrou texto com confiança razoável, usar este resultado
+                if word_count > 0 and avg_confidence > 0:
+                    result = {
+                        'text': text.strip(),
+                        'confidence': avg_confidence,
+                        'word_count': word_count,
+                        'char_count': char_count,
+                        'data': data,
+                        'config_used': config
+                    }
+                    
+                    # Se este resultado é melhor que o anterior, usar este
+                    if avg_confidence > best_result['confidence'] or best_result['word_count'] == 0:
+                        best_result = result
+                    
+                    # Se a confiança é boa (>50%), parar aqui
+                    if avg_confidence > 50:
+                        break
+                        
+            except Exception as e:
+                # Continuar tentando outras configurações
+                if 'error' not in best_result:
+                    best_result['error'] = str(e)
+                continue
+        
+        # Se não encontrou nada, tentar sem pré-processamento
+        if best_result['word_count'] == 0 and preprocess:
+            try:
+                # Tentar com imagem original
+                text = pytesseract.image_to_string(image, lang=lang, config=r'--oem 3 --psm 6')
+                if text.strip():
+                    word_count = len([w for w in text.split() if w.strip()])
+                    if word_count > 0:
+                        best_result = {
+                            'text': text.strip(),
+                            'confidence': 30,  # Confiança baixa mas texto encontrado
+                            'word_count': word_count,
+                            'char_count': len(text.strip()),
+                            'data': {},
+                            'note': 'Texto encontrado sem pré-processamento'
+                        }
+            except:
+                pass
+        
+        return best_result
     
     def extract_text_from_pdf(
         self,
@@ -2147,8 +2194,69 @@ def show_scan_documents():
         else:
             pages_input = None
     
-    # Processar arquivo
-    if uploaded_file and st.button("🚀 Escanear Documento", type="primary"):
+    # Se for imagem, oferecer conversão direta para PDF (sem OCR)
+    if file_type == "Imagem" and uploaded_file:
+        st.info("💡 **Dica**: Você pode converter a imagem para PDF diretamente ou usar OCR para extrair texto primeiro.")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📄 Converter para PDF (Sem OCR)", type="primary", key="direct_pdf_convert"):
+                with st.spinner("Convertendo imagem para PDF..."):
+                    try:
+                        # Salvar arquivo temporário
+                        if uploaded_file.name:
+                            file_ext = uploaded_file.name.split('.')[-1].lower()
+                            base_name = Path(uploaded_file.name).stem
+                        else:
+                            file_ext = 'jpg'
+                            base_name = "documento"
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
+                            tmp_file.write(uploaded_file.getvalue())
+                            tmp_path = tmp_file.name
+                        
+                        # Ler e converter imagem
+                        image = Image.open(tmp_path)
+                        if image.mode in ("RGBA", "P", "LA"):
+                            image = image.convert("RGB")
+                        
+                        # Criar PDF
+                        pdf_name = f"documento_{base_name}.pdf"
+                        image.save(pdf_name, "PDF", resolution=300.0)
+                        
+                        # Salvar no session_state
+                        pdf_key = f"pdf_{base_name}"
+                        st.session_state[pdf_key] = pdf_name
+                        
+                        st.success("✅ PDF criado com sucesso!")
+                        
+                        # Mostrar botão de download
+                        with open(pdf_name, "rb") as file:
+                            st.download_button(
+                                label="📥 Baixar PDF",
+                                data=file.read(),
+                                file_name=pdf_name,
+                                mime="application/pdf",
+                                key=f"download_{pdf_key}"
+                            )
+                        
+                        # Limpar arquivo temporário
+                        try:
+                            os.unlink(tmp_path)
+                        except:
+                            pass
+                            
+                    except Exception as e:
+                        st.error(f"❌ Erro ao converter para PDF: {str(e)}")
+                        import traceback
+                        with st.expander("🔍 Detalhes do erro"):
+                            st.code(traceback.format_exc())
+        
+        with col2:
+            st.caption("Ou use OCR para extrair texto do documento")
+    
+    # Processar arquivo com OCR
+    if uploaded_file and st.button("🚀 Escanear Documento (OCR)", type="primary"):
         with st.spinner("Processando documento com OCR..."):
             try:
                 # Salvar arquivo temporário
