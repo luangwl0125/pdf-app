@@ -413,7 +413,18 @@ from collections import defaultdict
 # Imports diretos das bibliotecas
 from pypdf import PdfWriter
 from pdfminer.high_level import extract_text
-from pdf2docx import Converter as PDF2DocxConverter
+
+# pdf2docx é opcional (pode falhar em ambientes headless sem OpenCV)
+try:
+    from pdf2docx import Converter as PDF2DocxConverter
+    PDF2DOCX_AVAILABLE = True
+except ImportError:
+    PDF2DocxConverter = None
+    PDF2DOCX_AVAILABLE = False
+except Exception as e:
+    # Pode falhar se OpenCV não estiver disponível corretamente
+    PDF2DocxConverter = None
+    PDF2DOCX_AVAILABLE = False
 
 # Verificar disponibilidade do scanner (agora no mesmo arquivo)
 SCANNER_AVAILABLE = TESSERACT_AVAILABLE and PDF2IMAGE_AVAILABLE
@@ -622,6 +633,18 @@ def show_convert_pdf_to_other_formats():
 
 def convert_pdf_to_word(uploaded_file):
     """Converte PDF para Word (DOCX)"""
+    if not PDF2DOCX_AVAILABLE:
+        st.error("❌ Conversão para Word não está disponível.")
+        st.info("""
+        **Para usar esta funcionalidade, você precisa:**
+        - Instalar pdf2docx: `pip install pdf2docx`
+        - Instalar opencv-python-headless: `pip install opencv-python-headless`
+        
+        **Nota**: Em ambientes online (Streamlit Cloud), use `opencv-python-headless` 
+        em vez de `opencv-python` para evitar problemas com bibliotecas do sistema.
+        """)
+        return
+    
     if st.button("🚀 Converter para Word", type="primary"):
         with st.spinner("Convertendo PDF para Word..."):
             try:
@@ -646,6 +669,9 @@ def convert_pdf_to_word(uploaded_file):
                 st.success("✅ Conversão concluída!")
             except Exception as e:
                 st.error(f"❌ Erro: {str(e)}")
+                import traceback
+                with st.expander("🔍 Detalhes do erro"):
+                    st.code(traceback.format_exc())
             finally:
                 if os.path.exists(output_name):
                     os.remove(output_name)
